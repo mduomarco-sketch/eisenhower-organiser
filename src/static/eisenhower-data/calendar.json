@@ -1,0 +1,58 @@
+{
+  "generatedAt": "2026-11-09T06:00:00Z",
+  "timeZone": "Europe/Madrid",
+  "calendars": [
+    {
+      "name": "Tareas",
+      "color": "#c0564b"
+    },
+    {
+      "name": "Classes",
+      "color": "#5a7a99"
+    }
+  ],
+  "events": [
+    {
+      "id": "sample-001",
+      "calendar": "Tareas",
+      "title": "Submit structures assignment",
+      "start": "2026-11-10",
+      "end": "2026-11-11",
+      "allDay": true,
+      "description": "Final PDF to the course portal before midnight."
+    },
+    {
+      "id": "sample-002",
+      "calendar": "Tareas",
+      "title": "Prepare portfolio for internship applications",
+      "start": "2026-12-15",
+      "end": "2026-12-16",
+      "allDay": true
+    },
+    {
+      "id": "sample-003",
+      "calendar": "Tareas",
+      "title": "Reply to the student association email",
+      "start": "2026-11-11",
+      "end": "2026-11-12",
+      "allDay": true
+    },
+    {
+      "id": "sample-004",
+      "calendar": "Tareas",
+      "title": "Reorganise photo folders",
+      "start": "2027-01-20",
+      "end": "2027-01-21",
+      "allDay": true
+    },
+    {
+      "id": "sample-005",
+      "calendar": "Classes",
+      "title": "Design studio",
+      "start": "2026-11-10T09:00:00+01:00",
+      "end": "2026-11-10T13:00:00+01:00",
+      "allDay": false,
+      "location": "Room A1"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+/* Theme, buttons, inputs, cards and lists come from the plugin UI kit. */
+.stat-card {
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.list-item.completed {
+  opacity: 0.6;
+}
+
+.list-item.completed .task-title {
+  text-decoration: line-through;
+}

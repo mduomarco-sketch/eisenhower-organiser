@@ -1,0 +1,189 @@
+import { DropListModelSource } from '../../tasks/task.model';
+import { filterOutId } from '../../../util/filter-out-id';
+import {
+  arrayMove,
+  arrayMoveLeftUntil,
+  arrayMoveRightUntil,
+} from '../../../util/array-move';
+
+/**
+ * Moves an item to a position after the specified anchor.
+ * Used for anchor-based positioning which is more sync-friendly than full list replacement.
+ *
+ * @param itemId - The item to move
+ * @param afterItemId - The item to place after (null = move to start)
+ * @param currentList - The current list of IDs
+ * @returns The updated list with the item in its new position
+ */
+export const moveItemAfterAnchor = (
+  itemId: string,
+  afterItemId: string | null,
+  currentList: string[],
+): string[] => {
+  // Remove the item from its current position
+  const listWithoutItem = currentList.filter((id) => id !== itemId);
+
+  if (afterItemId === null) {
+    // Move to start
+    return [itemId, ...listWithoutItem];
+  }
+
+  const anchorIndex = listWithoutItem.indexOf(afterItemId);
+  if (anchorIndex === -1) {
+    // Anchor not found (concurrently deleted).
+    if (listWithoutItem.length < currentList.length) {
+      // Item already in list — preserve current position (no-op).
+      // Returns the original array reference so NgRx selectors detect no change.
+      return currentList;
+    }
+    // Item is new to this list (cross-list move) — append to end as fallback
+    // to prevent the item from being silently dropped.
+    return [...listWithoutItem, itemId];
+  }
+
+  // Insert after the anchor
+  const result = [...listWithoutItem];
+  result.splice(anchorIndex + 1, 0, itemId);
+  return result;
+};
+
+/**
+ * Extracts the anchor ID from a drag-drop event's new ordered list.
+ * The anchor is the item immediately before the moved item in the new list.
+ *
+ * @param itemId - The item that was moved
+ * @param newOrderedIds - The list after the drag-drop operation
+ * @returns The ID of the item before the moved item, or null if moving to start
+ */
+export const getAnchorFromDragDrop = (
+  itemId: string,
+  newOrderedIds: string[],
+): string | null => {
+  const newIndex = newOrderedIds.indexOf(itemId);
+  if (newIndex <= 0) {
+    return null;
+  }
+  return newOrderedIds[newIndex - 1];
+};
+
+export const moveTaskForWorkContextLikeState = (
+  taskId: string,
+  newOrderedIds: string[],
+  target: DropListModelSource | null,
+  taskIdsBefore: string[],
+): string[] => {
+  const idsFilteredMoving = taskIdsBefore.filter(filterOutId(taskId));
+  // NOTE: move to end of complete list for done tasks
+  const emptyListVal = target === 'DONE' ? idsFilteredMoving.length : 0;
+  return moveItemInList(taskId, idsFilteredMoving, newOrderedIds, emptyListVal);
+};
+
+/*
+We use this function because the dom list provided by the drag & drop event, might not
+be the same as actual list, because items might be sorted differently (done/undone) or
+items might be hidden (done sub tasks).
+Please note that the completeList depending on the circumstances might or might not
+include the itemId, while the partialList always should.
+*/
+export const moveItemInList = (
+  itemId: string,
+  completeList: string[],
+  partialList: string[],
+  emptyListVal = 0,
+): string[] => {
+  // Log.log(itemId, completeList, partialList);
+
+  let newIndex;
+  const curInUpdateListIndex = partialList.indexOf(itemId);
+  const prevItemId = partialList[curInUpdateListIndex - 1];
+  const nextItemId = partialList[curInUpdateListIndex + 1];
+  const newCompleteListWithoutItem = completeList.filter((id) => id !== itemId);
+
+  if (!partialList.includes(itemId)) {
+    throw new Error('Drop Model Error');
+  }
+
+  if (!itemId) {
+    throw new Error('Drop Model Error');
+    // } else if (newCompleteListWithoutItem.length === 0) {
+    //   newIndex = 0;
+  } else if (prevItemId) {
+    newIndex = newCompleteListWithoutItem.indexOf(prevItemId) + 1;
+  } else if (nextItemId) {
+    newIndex = newCompleteListWithoutItem.indexOf(nextItemId);
+  } else if (partialList.length === 1) {
+    newIndex = emptyListVal;
+  } else {
+    throw new Error('Drop Model Error');
+  }
+
+  const newCompleteList = [...newCompleteListWithoutItem];
+  // NOTE: splice does NOT return the updated array... :/
+  newCompleteList.splice(newIndex, 0, itemId);
+
+  return newCompleteList;
+};
+
+/**
+ * Replays a keyboard "move task up" against a work context's task order
+ * (#11464). `undoneTaskIds` is the op's snapshot of the context's NOT-done
+ * ids, in list order, taken when the user moved the task (the wire-frozen
+ * `doneTaskIds` field).
+ *
+ * The user's intent is "put the task right before its upper neighbour", the
+ * snapshot's previous id. Without a concurrent change that neighbour is the
+ * first snapshot task above the task, and this is exactly the legacy
+ * `arrayMoveLeftUntil` move. When the first snapshot task above is earlier in
+ * the snapshot than the neighbour, the neighbour is gone (deleted or moved out
+ * of the list on another device) or already below the task. The legacy move
+ * would then jump the task over that earlier task, while the moving device,
+ * applying the delete after its move, keeps the task in the neighbour's slot.
+ * So the task goes right after that earlier task instead, which makes the
+ * move commute with the delete.
+ */
+export const moveUndoneTaskUpInList = (
+  list: string[],
+  taskId: string,
+  undoneTaskIds: string[],
+): string[] => {
+  const undoneIndex = new Map(undoneTaskIds.map((id, i) => [id, i]));
+  const isSkipped = (id: string): boolean => !undoneIndex.has(id);
+  const ownIndex = undoneIndex.get(taskId);
+  const from = list.indexOf(taskId);
+  if (ownIndex === undefined || ownIndex === 0 || from === -1) {
+    return arrayMoveLeftUntil(list, taskId, isSkipped);
+  }
+  let stop = from - 1;
+  while (stop >= 0 && isSkipped(list[stop])) {
+    stop--;
+  }
+  if (stop < 0 || (undoneIndex.get(list[stop]) as number) >= ownIndex - 1) {
+    return arrayMoveLeftUntil(list, taskId, isSkipped);
+  }
+  // The upper neighbour is missing: take its slot after the nearest earlier task.
+  return stop + 1 === from ? list : arrayMove(list, from, stop + 1);
+};
+
+/** Mirror of {@link moveUndoneTaskUpInList} for "move task down" (#11464). */
+export const moveUndoneTaskDownInList = (
+  list: string[],
+  taskId: string,
+  undoneTaskIds: string[],
+): string[] => {
+  const undoneIndex = new Map(undoneTaskIds.map((id, i) => [id, i]));
+  const isSkipped = (id: string): boolean => !undoneIndex.has(id);
+  const ownIndex = undoneIndex.get(taskId);
+  const from = list.indexOf(taskId);
+  if (ownIndex === undefined || ownIndex === undoneTaskIds.length - 1 || from === -1) {
+    return arrayMoveRightUntil(list, taskId, isSkipped);
+  }
+  let stop = from + 1;
+  while (stop < list.length && isSkipped(list[stop])) {
+    stop++;
+  }
+  if (stop >= list.length || (undoneIndex.get(list[stop]) as number) <= ownIndex + 1) {
+    return arrayMoveRightUntil(list, taskId, isSkipped);
+  }
+  // The lower neighbour is missing: take its slot before the nearest later task.
+  return stop - 1 === from ? list : arrayMove(list, from, stop - 1);
+};

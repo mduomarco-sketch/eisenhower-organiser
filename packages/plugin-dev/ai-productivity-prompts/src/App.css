@@ -1,0 +1,9 @@
+/*
+ * AI Productivity Prompts Plugin Styles
+ * Layout, cards, forms and buttons come from the plugin UI kit; only
+ * centering of intro blocks is plugin-specific.
+ */
+
+.intro {
+  text-align: center;
+}

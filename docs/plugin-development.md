@@ -1,0 +1,1204 @@
+# Super Productivity Plugin Development Guide
+
+Plugins add buttons, panels, shortcuts and integrations to Super Productivity.
+A plugin is a ZIP with a `manifest.json` and JavaScript (`plugin.js`) and/or an
+HTML page (`index.html`); no build step is required.
+
+**Source of truth.** This guide explains concepts and the most used methods.
+The complete API — every `PluginAPI` method with its signature and comments — is
+[`packages/plugin-api/src/types.ts`](../packages/plugin-api/src/types.ts),
+published on npm as
+[`@super-productivity/plugin-api`](https://www.npmjs.com/package/@super-productivity/plugin-api).
+The npm package is versioned like the app: version X.Y.Z describes the API of
+Super Productivity X.Y.Z. Set a plugin's `minSupVersion` to the oldest app
+version that has every method it uses — not simply the newest, since people on
+slower release channels run older versions.
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Plugin Manifest](#plugin-manifest)
+- [Plugin Types](#plugin-types)
+- [Available API Methods](#available-api-methods)
+- [Best Practices](#best-practices)
+- [Security Considerations](#security-considerations)
+- [Testing Your Plugin](#testing-your-plugin)
+
+## Quick Start
+
+Your first plugin in about five minutes. You need a text editor and
+[Node.js](https://nodejs.org) 20.15 or newer (only to pack the ZIP).
+
+### 1. Copy the starter
+
+Copy the [plugin starter](../packages/plugin-starter) folder to a folder or
+repository of your own. It is plain JavaScript with no dependencies: a header
+button and a hook. With git:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/super-productivity/super-productivity.git sp-source
+git -C sp-source sparse-checkout set packages/plugin-starter
+cp -r sp-source/packages/plugin-starter my-plugin
+rm -rf sp-source
+```
+
+### 2. Make it yours
+
+In `manifest.json`, set a unique `id` (letters, numbers and dashes), `name`,
+`description` and `author`. Then edit `plugin.js`:
+
+```javascript
+PluginAPI.registerHeaderButton({
+  label: 'Say hello',
+  icon: 'waving_hand', // any Material icon name
+  onClick: async () => {
+    const tasks = await PluginAPI.getCurrentContextTasks();
+    PluginAPI.showSnack({ msg: `${tasks.length} tasks here`, type: 'SUCCESS' });
+  },
+});
+```
+
+### 3. Pack and install
+
+```bash
+node scripts/pack.mjs   # writes plugin.zip and prints its SHA-256
+```
+
+In the app: **Settings → Plugins → Choose Plugin File** → `plugin.zip`. Use a
+test instance, not your real data — for example
+[test-app.super-productivity.com](https://test-app.super-productivity.com).
+
+### 4. Iterate
+
+Edit, pack, and upload again: the same `id` replaces the installed plugin. Open
+the developer tools (F12 or Ctrl+Shift+I) for errors and `console.log` output.
+
+### Editor autocomplete
+
+Run `npm install --save-dev @super-productivity/plugin-api` in your plugin
+folder. The starter's `jsconfig.json` points editors such as VS Code at the
+installed types, so they autocomplete every `PluginAPI` method; add
+`// @ts-check` as the first line of `plugin.js` to have mistakes flagged too.
+
+Outside the starter, reference the global types at the top of a file:
+
+```javascript
+/// <reference types="@super-productivity/plugin-api/global" />
+```
+
+In TypeScript you can instead declare the global yourself:
+
+```typescript
+import type { PluginAPI as PluginAPIType } from '@super-productivity/plugin-api';
+declare const PluginAPI: PluginAPIType;
+```
+
+### Plugin structure
+
+```
+my-plugin/
+├── manifest.json      # Plugin metadata (required)
+├── plugin.js          # Host-side plugin code (optional for iframe-only plugins)
+├── index.html         # UI interface (required when omitting plugin.js; requires iFrame:true in manifest)
+├── icon.svg           # Plugin icon (optional)
+└── i18n/              # Translations (optional), see PLUGIN_I18N.md
+```
+
+`plugin.js` is required for plugins that need host-side setup at plugin load time,
+shortcuts, header buttons, background behavior, or host-side API handlers. A UI-only
+iframe plugin can ship only `manifest.json` and `index.html` when the manifest sets
+`iFrame: true`.
+
+### More examples
+
+- [yesterday-tasks-plugin](../packages/plugin-dev/yesterday-tasks-plugin) — plain
+  JavaScript with an iframe side panel
+- [api-test-plugin](../packages/plugin-dev/api-test-plugin) — exercises most API calls
+- [procrastination-buster](../packages/plugin-dev/procrastination-buster) — TypeScript
+- [boilerplate-solid-js](../packages/plugin-dev/boilerplate-solid-js) — SolidJS UI
+  with Vite. It builds inside this repository only; see its README.
+- All bundled plugins: [packages/plugin-dev](../packages/plugin-dev)
+
+## Plugin Manifest
+
+The `manifest.json` file is required for all plugins and defines the plugin's metadata and configuration.
+
+Use
+[`PluginManifest`](../packages/plugin-api/src/types.ts)
+as the authoritative field contract. In particular, `hooks` and `permissions`
+are required arrays (use `[]` when unused), while `description` is optional.
+Do not rely on the installer's deliberately minimal runtime checks to infer the
+TypeScript contract.
+
+Installation and activation reject plugins whose `minSupVersion` is newer than
+the app, including uploaded plugins reloaded from cache. The error shows the
+required and current app versions. Comparison uses dotted numeric versions,
+ignoring a leading `v` and prerelease/build suffixes; missing or unparseable
+versions are not blocked by this check.
+
+Of the declared permissions, the app checks only `nodeExecution`, `http`
+together with `allowedHosts`, and `deleteProject`. The rest are shown in the
+plugin's details but not enforced; see [Security Considerations](#security-considerations).
+
+### Declaring what your plugin sends (dataSharing)
+
+`dataSharing` lists every place your plugin sends data off the device. The app
+shows it when someone connects an issue provider, in the install and update
+confirmation, and in the plugin's details. Use `[]` if the plugin sends
+nothing. Without the field, users see "This plugin doesn't say what data it sends."
+The app shows what you declare and does not verify it.
+
+```json
+"allowedHosts": ["api.example.com"],
+"dataSharing": [
+  {
+    "recipient": "Example",
+    "hosts": ["api.example.com"],
+    "data": ["credentials", "taskTitles"],
+    "optionalData": ["taskNotes"],
+    "privacyPolicyUrl": "https://example.com/privacy"
+  }
+]
+```
+
+- `data` / `optionalData`: `credentials`, `userText`, `taskTitles`,
+  `taskNotes`, `taskSchedule`, `taskStatus`, `timeTracked`,
+  `projectAndTagNames`, `ids`. `optionalData` is sent only after the user
+  turns a setting on. Unknown values install with a warning and show as
+  "other data".
+- `userServer: true` when the user enters the server address (self-hosted
+  instances, webhooks).
+- `privacyPolicyUrl` must use `https://`.
+- If `dataSharing` is present, every `allowedHosts` entry must appear in some
+  destination's `hosts`.
+
+### Complete Manifest Example
+
+```json
+{
+  "id": "my-advanced-plugin",
+  "name": "My Advanced Plugin",
+  "version": "2.1.0",
+  "description": "An advanced plugin with UI and hooks",
+  "manifestVersion": 1,
+  "minSupVersion": "14.0.2",
+  "icon": "icon.svg",
+  "iFrame": true,
+  "sidePanel": false,
+  "permissions": ["getTasks", "updateTask"],
+  "hooks": ["taskComplete", "taskUpdate", "currentTaskChange"]
+}
+```
+
+## Plugin Types
+
+### 1. JavaScript Plugins (`plugin.js`)
+
+Pure JavaScript plugins with full API access. **These run in the host app's own
+renderer** (via `new Function`), not in a sandbox — plugin code shares the page's
+context and can reach privileged host APIs, so only install plugins whose source you
+trust (see [Security Considerations](#security-considerations)).
+
+**Use when:**
+
+- For setup background stuff that is to be executed even when the plugin ui (iFrame) is not shown
+- For registering and handling keyboard shortcuts
+- You want to listen to app hooks/events
+- You need programmatic interaction with tasks/projects
+
+**Example:**
+
+```javascript
+// Register multiple UI elements
+PluginAPI.registerHeaderButton({
+  label: 'My Button',
+  icon: 'star',
+  onClick: async () => {
+    const tasks = await PluginAPI.getTasks();
+    console.log(`You have ${tasks.length} tasks`);
+  },
+});
+
+// Hook handlers receive one payload object (see HookPayloadMap in types.ts)
+PluginAPI.registerHook(PluginAPI.Hooks.TASK_COMPLETE, ({ taskId }) => {
+  console.log(`Task ${taskId} completed!`);
+});
+```
+
+### 2. HTML/Iframe Plugins (`index.html`)
+
+Plugins that render custom UI in an iframe. The iframe sandbox attribute limits
+some browser capabilities, but `allow-same-origin` means it is not a security
+boundary from the host app.
+
+**Use when:**
+
+- You need custom UI/visualizations
+- You want to display charts, forms, or complex interfaces
+
+Iframe-only plugins do not need a `plugin.js` file if all plugin behavior lives inside
+`index.html`. Super Productivity automatically adds the default menu or side-panel entry
+from the manifest when the plugin is loaded.
+
+**Important:** Iframe plugins are served through `srcdoc` and receive a filtered
+Plugin API message bridge as their supported interface. Because the iframe is
+same-origin, plugin code can also reach the parent directly; do not treat the
+bridge as enforced isolation. Inline CSS, JavaScript, and small assets directly
+in `index.html`; arbitrary extra files from the ZIP are not served to the iframe.
+External URLs can work when the app/runtime CSP allows them, but they are not part
+of the portable plugin contract.
+
+**Example index.html:**
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>My Plugin UI</title>
+
+    <!-- CSS must be inlined. Theme variables and the UI Kit are injected
+         automatically, so most plugins need little or no CSS of their own. -->
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <h1>My Plugin</h1>
+        <button
+          id="loadTasks"
+          class="btn-primary"
+        >
+          Load Tasks
+        </button>
+      </header>
+      <ul
+        id="taskList"
+        class="list"
+      ></ul>
+    </main>
+
+    <!-- JavaScript must be inlined -->
+    <script>
+      document.getElementById('loadTasks').addEventListener('click', async () => {
+        try {
+          const tasks = await PluginAPI.getTasks();
+          const taskList = document.getElementById('taskList');
+          taskList.replaceChildren();
+
+          tasks.forEach((task) => {
+            const taskEl = document.createElement('li');
+            taskEl.className = 'list-item';
+            taskEl.textContent = task.title;
+            taskList.appendChild(taskEl);
+          });
+
+          PluginAPI.showSnack({
+            msg: `Loaded ${tasks.length} tasks`,
+            type: 'SUCCESS',
+          });
+        } catch (error) {
+          console.error('Error loading tasks:', error);
+          PluginAPI.showSnack({
+            msg: 'Failed to load tasks',
+            type: 'ERROR',
+          });
+        }
+      });
+    </script>
+  </body>
+</html>
+```
+
+### Theme Variables & UI Kit
+
+Iframe plugins automatically receive:
+
+1. **CSS variables**: the host's current theme tokens on `:root` (full list:
+   [`plugin-theme-vars.ts`](../src/app/plugins/util/plugin-theme-vars.ts)).
+   Use them for any custom CSS so your plugin follows all themes and dark mode.
+   Only these variables exist inside the iframe.
+2. **UI Kit**: element defaults and a few classes that match the app's Angular
+   Material look, so plugins look like the app and like each other. The kit lives
+   in a cascade layer (`@layer sp-ui-kit`): **any** CSS of yours wins over it,
+   whatever its specificity. Delete CSS the kit already covers instead of
+   overriding it. Disable the kit with `"uiKit": false` in the manifest.
+
+An open plugin view follows dark mode and custom theme switches live; a project
+color change shows after reopening the view. The app's fonts (Open Sans and the
+Material Symbols icon font) are available too: text uses the app font, and
+`<span class="material-icons">edit</span>` renders the same icons as the app
+(any [Material Symbols](https://fonts.google.com/icons) name).
+
+**Elements styled by default:** headings, `p`, `a`, lists, `table`, `code`,
+`pre`, `blockquote`, `hr`, `button` (outlined), `input`/`textarea`/`select`
+(filled fields), checkboxes and radios (a `<label>` wrapping one becomes an
+inline control), `progress`, `fieldset`, and `<dialog>` (a dialog surface with
+backdrop). Keyboard focus shows the app's focus ring.
+
+**Buttons:** add a variant class to `<button>`.
+
+| Class                   | Looks like                                       |
+| ----------------------- | ------------------------------------------------ |
+| _(none)_                | Outlined button: secondary or alternative action |
+| `btn-primary`           | Filled primary-color button: the main action     |
+| `btn-outline`           | Outlined in the primary color                    |
+| `btn-text`              | Borderless text button: cancel, dismiss          |
+| `btn-icon`              | Round icon-only button; give it an `aria-label`  |
+| `btn-danger` (modifier) | Destructive: `class="btn-primary btn-danger"`    |
+| `aria-pressed="true"`   | Selected state for toggle buttons                |
+
+**Layout:**
+
+- `.page`: centered content column (max 800px) with page padding
+- `.page-header`: title row; the heading grows, buttons sit on the right
+- `.stack`: vertical flow with even gaps (child margins removed)
+- `.row`: wrapping horizontal group; `.actions`: right-aligned button row
+- `.grid`: responsive card grid; `.grow`: fills the remaining row space
+
+**Content:**
+
+- `.card` and `.card-clickable` (works on `<button class="card">` too)
+- `.list` with `.list-item` rows, like the app's settings rows; `a`/`button`
+  rows get a hover state
+- `.field` wraps a `label`, control and `.field-hint` or `.field-error`; mark
+  invalid controls with `aria-invalid="true"`
+- `.callout` (info), `.callout--success`, `.callout--warning`,
+  `.callout--danger`: tinted message box; an optional leading `<svg>` is tinted
+  too
+- `.chip`, `.empty-state`, `.spinner`
+- `.material-icons`: 24px icon, 18px inside a labelled button; mark it
+  `aria-hidden="true"` and label the button instead
+- Text: `.text-muted`, `.text-primary`, `.text-danger`,
+  `.text-sm`;
+  `.page-fade` fades a view in
+
+```html
+<main class="page stack">
+  <header class="page-header">
+    <h1>Exports</h1>
+    <button class="btn-primary">New export</button>
+  </header>
+  <div class="callout callout--warning"><p>Exports include archived tasks.</p></div>
+  <div class="field">
+    <label for="name">Name</label>
+    <input id="name" />
+    <p class="field-hint">Shown in the file name.</p>
+  </div>
+  <ul class="list">
+    <li class="list-item">
+      <span class="grow">Weekly report</span>
+      <button
+        class="btn-icon btn-danger"
+        aria-label="Delete"
+      >
+        <span
+          class="material-icons"
+          aria-hidden="true"
+          >delete</span
+        >
+      </button>
+    </li>
+  </ul>
+  <div class="actions">
+    <button class="btn-text">Cancel</button>
+    <button class="btn-primary">Save</button>
+  </div>
+</main>
+```
+
+The [API test plugin](../packages/plugin-dev/api-test-plugin/index.html) shows
+every element and class.
+
+**Key CSS variables:**
+
+- Surfaces and text: `--bg`, `--card-bg`, `--text-color`, `--text-color-muted`,
+  `--divider-color`
+- Colors: `--c-primary` with `--c-contrast` (text on primary), `--c-warn` with
+  `--c-warn-contrast`, `--color-success`, `--color-warning`, `--color-danger`
+- States: `--state-hover`, `--state-pressed`, `--state-selected`,
+  `--focus-ring-color`
+- Inputs: `--input-bg`, `--input-bg-hover`, `--input-border-color`
+- Spacing: `--s-quarter`, `--s-half`, `--s`, `--s2`, `--s3`, `--s4`
+- Radius: `--radius-xs` … `--radius-xl`, `--radius-pill`,
+  `--card-border-radius`
+- Type: `--font-size-xs` … `--font-size-3xl`, `--font-weight-medium`,
+  `--font-weight-semibold`, `--font-primary-stack`, `--font-mono-stack`
+- Elevation: `--whiteframe-shadow-1dp` … `--whiteframe-shadow-24dp`
+- Motion: `--transition-standard`, `--transition-duration-s`
+- `--is-dark-theme`: `1` in dark mode, `0` in light mode
+
+## Available API Methods
+
+This section covers the most used methods. The complete list, with signatures,
+is [`types.ts`](../packages/plugin-api/src/types.ts) (`interface PluginAPI`).
+
+### Data Operations
+
+#### Tasks
+
+- `getTasks()` - Get all active tasks
+- `getArchivedTasks()` - Get archived tasks
+- `getCurrentContextTasks()` - Get tasks in current context
+- `getSelectedTask()` - Get the task selected in the task detail panel, or `null`
+- `getFocusedTask()` - Get the currently focused task row, or `null`. Task-row focus is cleared when focus moves elsewhere, including into iframe side panels; use `getSelectedTask()` for persistent side-panel task context.
+- `addTask(task)` - Create a new task. Short syntax in the title (`#tag`, `@date`, `+project`, `30m`) is parsed like typed input; pass `isIgnoreShortSyntax: true` to keep a title from user content or a model verbatim.
+- `updateTask(taskId, updates)` - Update existing task. Setting `dueDay` adds the task to that Planner day (or Today). A scheduled time (`dueWithTime`) and its reminder take precedence over `dueDay`, and `updateTask` cannot clear a reminder yet, so use this for tasks without a time. The task is added at the end of that day. Take day strings from `getDayContext().todayStr` so the user's start of next day is honoured. Pass `{ isIgnoreShortSyntax: true }` as the third argument to keep a new title verbatim.
+- `startTracking(taskId)` / `stopTracking()` - Start or stop time tracking. Rejects for an unknown or done task (unlike the play button, it does not reopen it) and for a parent whose subtasks are all done. For a parent task, tracking starts on its first unfinished subtask. The tracked task arrives with `currentTaskChange`.
+
+#### Day
+
+- `getDayContext()` - `{ todayStr, startOfNextDayDiffMs }`. `todayStr` is the user's logical day (YYYY-MM-DD): before the configured start of the next day it is still the previous calendar day. To find a timestamp's logical day, subtract `startOfNextDayDiffMs` before taking its local date. Re-read it on `DAY_CHANGE`.
+
+Feature-detect `getDayContext`, `startTracking` and `stopTracking` on older hosts.
+
+#### Application State
+
+- `getAppState()` - Get the current application state (read-only; returns `PluginAppState`). An overview of the data returned is the JSON file exported via `Settings > Sync & Backup > Import/Export > Export data`. Example: `const state = await PluginAPI.getAppState();`
+
+#### Projects
+
+- `getAllProjects()` - Get all projects
+- `addProject(project)` - Create new project
+- `updateProject(projectId, updates)` - Update project
+- `deleteProject(projectId)` - Delete a project **and the tasks it contains** (backlog and subtasks included), the same cascade the UI's "Delete project" applies. Deleting the Inbox is rejected, and if the deleted project is the active one the app falls back to the Today context.
+
+#### Tags
+
+- `getAllTags()` - Get all tags
+- `addTag(tag)` - Create new tag
+- `updateTag(tagId, updates)` - Update tag
+
+#### Simple Counters
+
+Simple counters let you track lightweight metrics (e.g., daily clicks or habits) that persist and sync with your data. There are two levels: **basic** (key-value pairs for today's count) and **full model** (full CRUD on `SimpleCounter` entities with date-specific values).
+
+##### Basic Counters
+
+These treat counters as a simple `{ [id: string]: number }` map for today's values (auto-upserts via NgRx).
+
+| Method                                  | Description                                                                      | Example                                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `getAllCounters()`                      | Get all counters as `{ [id: string]: number }`                                   | `const counters = await PluginAPI.getAllCounters(); console.log(counters['my-key']);` |
+| `getCounter(id)`                        | Get today's value for a counter (returns `null` if unset)                        | `const val = await PluginAPI.getCounter('daily-commits');`                            |
+| `setCounter(id, value)`                 | Set today's value (non-negative number; validates id regex `/^[A-Za-z0-9_-]+$/`) | `await PluginAPI.setCounter('daily-commits', 5);`                                     |
+| `incrementCounter(id, incrementBy = 1)` | Increment and return new value (floors at 0)                                     | `const newVal = await PluginAPI.incrementCounter('daily-commits', 2);`                |
+| `decrementCounter(id, decrementBy = 1)` | Decrement and return new value (floors at 0)                                     | `const newVal = await PluginAPI.decrementCounter('daily-commits');`                   |
+| `deleteCounter(id)`                     | Delete the counter                                                               | `await PluginAPI.deleteCounter('daily-commits');`                                     |
+
+**Example:**
+
+```javascript
+// Track daily commits
+let commits = (await PluginAPI.getCounter('daily-commits')) ?? 0;
+await PluginAPI.incrementCounter('daily-commits');
+PluginAPI.showSnack({
+  msg: `Commits today: ${await PluginAPI.getCounter('daily-commits')}`,
+  type: 'INFO',
+});
+```
+
+##### Full SimpleCounter Model
+
+For advanced use: Full CRUD on counters with metadata (title, enabled state, date-specific values via `countOnDay: { [date: string]: number }`).
+
+| Method                                   | Description                                                                       | Example                                                               |
+| ---------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `getAllSimpleCounters()`                 | Get all as `SimpleCounter[]`                                                      | `const all = await PluginAPI.getAllSimpleCounters();`                 |
+| `getSimpleCounter(id)`                   | Get one by id (returns `undefined` if not found)                                  | `const counter = await PluginAPI.getSimpleCounter('my-id');`          |
+| `updateSimpleCounter(id, updates)`       | Partial update (e.g., `{ title: 'New Title', countOnDay: { '2025-11-17': 10 } }`) | `await PluginAPI.updateSimpleCounter('my-id', { isEnabled: false });` |
+| `toggleSimpleCounter(id)`                | Toggle `isOn` state (throws if not found)                                         | `await PluginAPI.toggleSimpleCounter('my-id');`                       |
+| `setSimpleCounterEnabled(id, isEnabled)` | Set enabled state                                                                 | `await PluginAPI.setSimpleCounterEnabled('my-id', true);`             |
+| `deleteSimpleCounter(id)`                | Delete by id                                                                      | `await PluginAPI.deleteSimpleCounter('my-id');`                       |
+| `setSimpleCounterToday(id, value)`       | Set today's value (YYYY-MM-DD)                                                    | `await PluginAPI.setSimpleCounterToday('my-id', 10);`                 |
+| `setSimpleCounterDate(id, date, value)`  | Set value for specific date (validates YYYY-MM-DD)                                | `await PluginAPI.setSimpleCounterDate('my-id', '2025-11-16', 5);`     |
+
+**Example:**
+
+```javascript
+// Create/update a habit counter
+await PluginAPI.updateSimpleCounter('habit-streak', {
+  title: 'Daily Streak',
+  type: 'ClickCounter',
+  isEnabled: true,
+  countOnDay: { '2025-11-17': 1 }, // Today's count
+});
+await PluginAPI.toggleSimpleCounter('habit-streak');
+const counter = await PluginAPI.getSimpleCounter('habit-streak');
+console.log(`Streak on: ${counter.isOn}`);
+```
+
+### UI Operations
+
+#### Notifications
+
+```javascript
+// Show snackbar notification
+PluginAPI.showSnack({
+  msg: 'Operation completed!',
+  type: 'SUCCESS', // SUCCESS, ERROR, INFO, WARNING
+  ico: 'check', // Optional Material icon
+  // Optional action button; the snack then stays visible longer.
+  // plugin.js only: functions cannot cross the iframe message boundary.
+  action: { label: 'Undo', onClick: () => console.log('Undo clicked') },
+});
+
+// System notification
+PluginAPI.notify({
+  title: 'Task Complete',
+  body: 'Great job!',
+  ico: 'done',
+});
+```
+
+#### Dialogs
+
+```javascript
+// Open a dialog
+const result = await PluginAPI.openDialog({
+  title: 'Confirm Action',
+  htmlContent: '<p>Are you sure?</p>',
+  buttons: [{ label: 'No' }, { label: 'Yes', color: 'primary', raised: true }],
+});
+
+if (result === 'Yes') {
+  // Continue with the confirmed action
+}
+```
+
+`openDialog()` resolves with the clicked button label. If the user dismisses
+the dialog without clicking a button, it resolves with `undefined`. The legacy
+`content`, `okBtnLabel`, and `cancelBtnLabel` fields are still accepted, but new
+plugins should use `htmlContent` and `buttons`.
+
+The host sanitizes `htmlContent` before rendering it, rebuilding the markup from
+an allowlist. Semantic HTML, native form controls (including their `id`s and
+values), `class`, `data-*`, `aria-*`, and inline layout styles are preserved.
+Removed are scripts, event-handler attributes, unsafe URLs, inline `<svg>`, and
+any `style` attribute containing `url(`, since dialog layout never needs to load
+a resource. Elements outside the allowlist are unwrapped, so their text stays
+visible while the tag itself is dropped.
+
+Escape untrusted values before interpolating them into the HTML string: the
+sanitizer is a safety net for the host, not a substitute for escaping in your
+plugin. Use `content` when plain text is sufficient.
+
+### Registration Methods (plugin.js only)
+
+#### Header Button
+
+```javascript
+PluginAPI.registerHeaderButton({
+  id: 'my-header-btn', // Optional unique ID
+  label: 'Click Me',
+  icon: 'star', // Material icon name
+  onClick: () => {
+    console.log('Header button clicked');
+  },
+});
+```
+
+#### Menu Entry
+
+```javascript
+PluginAPI.registerMenuEntry({
+  label: 'My Plugin Action',
+  icon: 'extension',
+  onClick: () => {
+    console.log('Menu item clicked');
+  },
+});
+```
+
+#### Task Context Menu Entry
+
+Task context-menu entries can only be registered from host-side `plugin.js` code.
+The callback receives only the selected task ID; use the task API to read or
+update the task when needed.
+
+```javascript
+PluginAPI.registerTaskContextMenuEntry({
+  id: 'copy-external-link', // Unique within this plugin
+  label: 'Copy external link',
+  icon: 'link', // Optional Material icon ligature name (custom SVGs are not supported)
+  showFor: ['TASK'], // Optional: TASK, SUBTASK, or both when omitted; [] is invalid
+  onClick: ({ taskId }) => {
+    console.log('Selected task:', taskId);
+  },
+});
+```
+
+Entries appear under **Plugin actions** in the task's context menu. Labels contain at
+most 80 characters; add a short plugin-specific prefix yourself when disambiguation is
+needed. Re-registering the same `id` replaces the previous entry, and all entries are
+removed when the plugin unloads.
+
+#### Side Panel Button
+
+```javascript
+PluginAPI.registerSidePanelButton({
+  label: 'My Panel',
+  icon: 'dashboard',
+  onClick: () => {
+    PluginAPI.showIndexHtmlAsView();
+  },
+});
+```
+
+#### Keyboard Shortcut
+
+```javascript
+PluginAPI.registerShortcut({
+  id: 'my-shortcut', // optional, derived from the label when omitted
+  label: 'My Plugin Shortcut',
+  onExec: () => {
+    console.log('Shortcut triggered');
+  },
+});
+
+// Removes it again.
+PluginAPI.unregisterShortcut('my-shortcut');
+```
+
+Plugins do not pick the key combination: the shortcut shows up under **Plugin
+Shortcuts** in the keyboard settings, where the user assigns one. The binding is
+stored per shortcut id, so keep the id stable across app starts.
+
+#### Hooks
+
+```javascript
+// Available hooks
+const hooks = {
+  TASK_COMPLETE: 'taskComplete',
+  TASK_UPDATE: 'taskUpdate',
+  TASK_DELETE: 'taskDelete',
+  CURRENT_TASK_CHANGE: 'currentTaskChange',
+  FINISH_DAY: 'finishDay',
+  LANGUAGE_CHANGE: 'languageChange',
+  PERSISTED_DATA_CHANGED: 'persistedDataChanged',
+  ACTION: 'action',
+  DATA_CHANGED: 'dataChanged',
+  DAY_CHANGE: 'dayChange',
+};
+```
+
+`DATA_CHANGED` fires after tasks, projects or tags change from any source:
+the user, another plugin, planning, archiving, imports and remote sync, and
+when the selected or tracked task changes. It carries no payload; re-read
+what you display (`getSelectedTask()` for the selection). Use it to refresh a
+view only: it fires on every device for a synced change, so writing data in
+response would repeat the write on each one. Bursts (a sync batch, a bulk
+action) are coalesced into one call; while a task is tracked it fires about
+once a second, so compare what you render before redrawing. Prefer it over
+`ANY_TASK_UPDATE` for keeping a view current: that hook sees only local
+actions from a short list.
+
+`DAY_CHANGE` fires with `{ todayStr }` when the user's logical day changes
+while the app runs: at the rollover, or when the start-of-next-day setting
+moves it.
+
+`PERSISTED_DATA_CHANGED` fires whenever this plugin's persisted data
+changes — local writes, remote sync deliveries, and bulk imports —
+_after_ the host has finished its initial boot load. The handler
+receives no payload; re-call `loadSyncedData(key?)` for any key your
+plugin tracks to get fresh data. There is no replay-on-register and no
+guaranteed ordering across rapid changes, so handlers must be
+idempotent. The typical pattern is: call `loadSyncedData()` once on
+plugin init, then subscribe to this hook for subsequent updates.
+
+```javascript
+// Register hook listener
+// Hook handlers receive one payload object (see HookPayloadMap in types.ts)
+PluginAPI.registerHook(PluginAPI.Hooks.TASK_COMPLETE, ({ taskId }) => {
+  console.log(`Task ${taskId} completed!`);
+});
+
+// Listen to Redux actions
+PluginAPI.registerHook(PluginAPI.Hooks.ACTION, ({ action }) => {
+  if (action.type === '[Task Shared] addTask') {
+    console.log('New task added:', action.task.id);
+    // Bonus: Increment a counter on task add
+    PluginAPI.incrementCounter('tasks-added-today');
+  }
+});
+```
+
+### Data Persistence
+
+You can persist data that will also be synced via the `persistDataSynced` and
+`loadSyncedData` APIs. Host-side `plugin.js` code can use `localStorage` for
+data that should stay local. Iframe plugins should prefer the synced
+persistence APIs because direct iframe browser storage is not part of the
+portable plugin contract and can vary by runtime.
+
+```javascript
+// Save plugin data
+await PluginAPI.persistDataSynced(JSON.stringify({ count: 42 }));
+
+// Load saved data
+const data = await PluginAPI.loadSyncedData();
+console.log(data); // '{ count: 42 }'
+```
+
+### Listing synced data keys
+
+`listSyncedDataKeys(prefix?)` returns a sorted snapshot of the calling plugin's
+non-empty keys. It excludes the legacy unkeyed entry. The optional prefix is a
+literal string, not a pattern or path. Colons and Unicode are preserved without
+normalization. Sorting uses JavaScript's default string order, not locale order.
+
+```javascript
+if (typeof PluginAPI.listSyncedDataKeys === 'function') {
+  const keys = await PluginAPI.listSyncedDataKeys('attachment:task-id:');
+  for (const key of keys) {
+    const data = await PluginAPI.loadSyncedData(key);
+    // A record can disappear between listing and loading it.
+    if (data !== null) renderAttachment(JSON.parse(data));
+  }
+}
+```
+
+This works in both `plugin.js` and plugin iframes. It only reads applied
+application state, including previously unknown keys received by normal sync.
+It does not flush queued writes, wait for compression, trigger sync, or confirm
+disk persistence or delivery to another client. `loadSyncedData` can return a
+pending local value before a new key appears in this list. An existing key stays
+listed while its replacement is pending. Re-read after `persistedDataChanged`.
+Feature-detect the method when supporting older hosts.
+
+For example, an attachment plugin can store each attachment's metadata under an
+independent key. After sync, a second client needs to discover keys containing
+UUIDs it has never seen. `loadSyncedData(key)` requires a known key, and
+`persistedDataChanged` does not enumerate keys. Listing the existing records
+avoids a shared index blob that concurrent additions could overwrite.
+
+### Secret Storage
+
+For credentials — IMAP/SMTP passwords, API tokens, app passwords — use
+`setSecret` / `getSecret` / `deleteSecret`. Secrets are stored **local-only**:
+they are never synced, exported, or included in backups, and each plugin can
+only read its own keys.
+
+```javascript
+// Store a credential (key must be a non-empty string)
+await PluginAPI.setSecret('imapPassword', 'app-password-123');
+
+// Read it back when you need to connect
+const pw = await PluginAPI.getSecret('imapPassword'); // string | null
+
+// Remove it (e.g. when the user disconnects)
+await PluginAPI.deleteSecret('imapPassword');
+```
+
+Rules of thumb:
+
+- **Never** put a credential in `persistDataSynced` or in issue-provider
+  config — those sync to the server and land in exports/backups. Keep only
+  non-secret connection details there (host, port, username, filters) and put
+  the password/token in secret storage.
+- Secrets are **per-device**: a value set on desktop is not available on mobile,
+  so prompt the user to enter the credential on each device. (This matches how
+  IMAP app-passwords are typically used anyway.)
+- Secrets are stored unencrypted at rest today (the same as plugin OAuth
+  tokens); the guarantee is "stays on this device, never synced," not
+  hardware-level encryption. Don't store anything you wouldn't accept living in
+  the app's local profile.
+- All secrets for a plugin are purged automatically when the plugin is
+  uninstalled.
+
+#### Secrets in issue-provider plugins
+
+Issue-provider plugins get the same secret API (an issue provider is a normal
+plugin that also calls `registerIssueProvider`). Your definition callbacks
+(`getHeaders`, `getById`, `searchIssues`, …) run in your plugin's context, so
+they can read secrets directly:
+
+```javascript
+PluginAPI.registerIssueProvider({
+  // Declare only NON-secret fields here — their values are stored in the
+  // synced issue-provider config:
+  configFields: [
+    { key: 'host', type: 'text', label: 'Host' },
+    { key: 'username', type: 'text', label: 'Username' },
+  ],
+  // getHeaders may return a Promise, so read the credential from secret
+  // storage instead of from `config`:
+  async getHeaders(config) {
+    const token = await PluginAPI.getSecret('apiToken');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  },
+  async getById(issueId, config, http) {
+    /* ... http call uses the headers above ... */
+  },
+  // ...
+});
+```
+
+The host passes only the synced `config` into these callbacks — there is no
+secret parameter, and the declarative `configFields` form always writes to the
+synced config. So collect the secret through your own UI (a config dialog
+registered via `registerConfigHandler`, or a side panel) and store it with
+`setSecret` there; do **not** add the credential as a `configFields` entry.
+
+## Best Practices
+
+### 1. Performance
+
+- **Lazy load resources**: Don't load everything on plugin initialization
+- **Be responsive with using resources**: Avoid heavy operations and don't save excessive amounts of data.
+- **Keep it lightweight**: Super Productivity is not the only app on the users system and your plugin is not the only plugin.
+
+### 2. User Experience
+
+- **Provide feedback**: Show loading states and confirmations
+- **Be non-intrusive**: Don't spam notifications
+- **Follow the app's design**: Use the injected theme variables and try to keep styles minimal.
+- **Respect user preferences**: Check dark mode, and language settings (if possible or stick to english if not)
+
+### 3. Security
+
+- **Request minimal permissions**: Only what you need
+
+### Node.js Script Execution
+
+Plugins with `"permissions": ["nodeExecution"]` can run Node.js scripts in the Electron
+desktop app after the user allows the desktop permission prompt.
+
+Both built-in and uploaded (community) plugins may request `nodeExecution`. The grant is
+issued by the Electron **main** process after a native consent dialog and is bound to the
+plugin id. For uploaded plugins the app cannot verify the manifest, so the dialog flags
+the plugin as unverified third-party code with full machine access that Super Productivity
+cannot sandbox, and defaults to **Deny** — only allow plugins whose source you trust. If
+the user denies, the plugin returns to a disabled state; enabling it again reopens the
+prompt.
+
+Consent handling differs by plugin type:
+
+- **Uploaded (community) plugins:** consent is remembered **once per plugin** in a
+  main-owned, local-only store (`Allow` is not asked again on the next launch). The
+  consent is **never synced** — granting on one device does not auto-grant on another;
+  the other device prompts afresh on first node use. Consent is automatically cleared
+  (forcing a fresh prompt) when you **disable**, **uninstall**, or **re-upload** the
+  plugin, so replacing a plugin's code under the same id always re-asks. To revoke access
+  without removing the plugin, simply disable it.
+- **Built-in plugins** (e.g. `sync-md`) use the same ask-once consent, shown with the
+  verified on-disk name. Disabling the plugin clears it.
+
+> **Plugin id constraints (for `nodeExecution`):** the consent grant keys on your
+> manifest `id`, so it must be a single safe token — no whitespace, control/bidi
+> characters, `:`, path separators (`/`, `\`), and at most 100 characters. Lowercase
+> kebab-case is recommended; dots and uppercase are accepted.
+
+> **Security note:** a granted `nodeExecution` plugin can run any program with full
+> access to your files and system. The file/IPC channel a plugin uses to talk to a
+> companion process is an open local channel — treat any data it reads as untrusted
+> input (never `eval`/`require` its contents).
+
+```javascript
+const result = await plugin.executeNodeScript({
+  script: `
+    const os = require('os');
+    return os.hostname();
+  `,
+  timeout: 5000,
+});
+
+if (result.success) {
+  console.log('Hostname:', result.result);
+}
+```
+
+**Important — use `plugin.onReady()` for startup calls:**
+
+`executeNodeScript` requires the Electron IPC bridge to be available. On cold boot this
+bridge may not be ready when `plugin.js` first runs. Always put `executeNodeScript` calls
+(and any other startup init code) inside `plugin.onReady()`:
+
+```javascript
+// ❌ May fail on cold boot
+const result = await plugin.executeNodeScript({ script: 'return true' });
+
+// ✅ Correct — fires after the bridge is confirmed available
+plugin.onReady(async () => {
+  const result = await plugin.executeNodeScript({ script: 'return true' });
+});
+```
+
+`plugin.onReady(fn)` fires after `plugin.js` has fully evaluated **and** the app has
+confirmed the Node.js IPC bridge is responding (with automatic retry). If the bridge is
+unavailable after retries, an error is shown in the plugin management UI and `onReady` does
+not fire.
+
+You can also use `onReady` for any other startup work that should run after the plugin
+script has finished setting up its hooks and registrations — not just for `nodeExecution`.
+
+**Iframe plugins:** `PluginAPI.onReady()` is available inside `index.html`. It fires on
+the next microtask after the callback is registered — without an IPC bridge ping. This is
+fine in practice because iframe plugins are rendered on user navigation (well after host
+startup). Iframe API calls still go through the host bridge when they are made;
+cold-boot bridge pings are only performed for host-side plugin code.
+
+**Clean up with `plugin.onUnload()`:**
+
+Code-based plugins (`plugin.js`) run directly in the app's renderer, so timers and
+listeners they create are **not** cleaned up automatically when the plugin is disabled,
+reloaded, or uninstalled — a `setInterval` started by your plugin keeps firing until the
+app is fully reloaded. Register a teardown callback to clear them yourself:
+
+```javascript
+const intervalId = setInterval(doWork, 60000);
+
+plugin.onUnload(() => {
+  clearInterval(intervalId);
+  // also: removeEventListener, speechSynthesis.cancel(), close connections, …
+});
+```
+
+The host invokes the callback at the start of plugin teardown, while the Plugin API is
+still usable for calls like persisting data — but don't register new hooks or listeners
+from inside it (the plugin is going away; re-registering `onUnload` there is ignored).
+The returned promise is **not awaited** — do synchronous cleanup (`clearInterval` etc.)
+before any `await`, since teardown continues immediately. Registering again replaces the
+previous callback, so register once and do all cleanup there. Errors thrown by the
+callback are logged and do not block teardown.
+
+Plugins distributed independently of the app should feature-detect it
+(`if (plugin.onUnload) { ... }`) — hosts predating the hook don't provide it.
+
+**Iframe plugins:** `onUnload` exists but is a no-op — the host unmounts the iframe on
+unload, which takes its timers and listeners with it. Don't rely on it for unload-time
+persistence in iframes; persist when the data changes instead.
+
+### 4. Don't spam the logs
+
+`console.logs` should be kept to a minimum.
+
+### 5. Iframe plugins: keep assets self-contained
+
+1. **Prefer self-contained HTML**: inline CSS, JavaScript, and small assets are the
+   most portable option for iframe plugins
+
+```html
+<!-- Portable: Everything needed by the iframe is in index.html -->
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      /* All styles here */
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      // All JavaScript here
+    </script>
+  </body>
+</html>
+```
+
+## Security Considerations
+
+### Execution model & trust
+
+Plugins are **not** strongly sandboxed from the host — installing a plugin means
+trusting its code with your data:
+
+- JavaScript (`plugin.js`) plugins run in the host app's renderer via `new Function`,
+  in the same context as the app. They can reach privileged host APIs (including, on
+  desktop, `window.ea`).
+- Iframe plugins render with the `allow-same-origin` sandbox flag (required so the UI
+  paints on the packaged `file://` desktop build). Being same-origin, they can read
+  `window.parent.ea` directly, so the `postMessage` bridge is a convenience, not a hard
+  security boundary.
+- Filesystem/process access on desktop goes through `executeNodeScript()`, which stays
+  gated by an explicit main-process consent prompt (`nodeExecution` permission). This is
+  the only sanctioned way for a plugin to run native code.
+- There is no `window.ea.exec()`: the old IPC that ran arbitrary shell commands via
+  `child_process.exec` (reachable by any plugin/iframe/XSS, bypassing the `nodeExecution`
+  consent) was removed. Legacy `COMMAND` task attachments no longer execute.
+
+Only install plugins from sources you trust, and read the code first.
+
+### Iframe API Surface
+
+Iframe plugins receive a filtered `window.PluginAPI` object injected into `index.html`.
+The iframe can use the injected task/project/tag APIs, dialog and notification APIs,
+navigation helpers, persistence helpers, counters, action dispatch, `registerHook()`,
+and `registerWorkContextHeaderButton()`. Callback-heavy registration methods such as
+`registerHeaderButton()`, `registerMenuEntry()`, `registerTaskContextMenuEntry()`,
+`registerSidePanelButton()`, `registerShortcut()`/`unregisterShortcut()`, and
+`registerConfigHandler()` must be called from host-side `plugin.js` code. APIs not
+injected into the iframe are unavailable, even if they exist on the host-side plugin bridge.
+
+`executeNodeScript()` is proxied through the host bridge for iframe plugins when
+the desktop app grants the plugin `nodeExecution` permission.
+
+### Iframe Boundary
+
+- Iframe plugins render with `allow-same-origin` (required so the UI paints on the
+  packaged `file://` desktop build; an opaque-origin iframe stays blank — see #8467)
+- Because they are same-origin, iframe plugins can read `window.parent.ea` directly;
+  the filtered `postMessage` bridge is the intended API, not an enforced boundary
+- Remote assets depend on the app/runtime CSP and should not be relied on
+- Restoring opaque-origin isolation (serving the renderer from an `app://` scheme) is
+  tracked separately
+
+## Testing Your Plugin
+
+### 1. Local Development
+
+1. Build the plugin ZIP and upload it from **Settings** → **Plugins**
+2. Open DevTools (F12 or Ctrl+Shift+i) to see console logs
+3. Use the API Test Plugin as reference
+
+### 2. Debugging Tips
+
+```javascript
+// Add debug logging
+const DEBUG = true;
+
+function log(...args) {
+  if (DEBUG) {
+    console.log('[MyPlugin]', ...args);
+  }
+}
+
+// Test API methods
+async function testAPI() {
+  log('Testing getTasks...');
+  const tasks = await PluginAPI.getTasks();
+  log('Tasks:', tasks);
+
+  log('Testing showSnack...');
+  PluginAPI.showSnack({
+    msg: 'API test successful!',
+    type: 'SUCCESS',
+  });
+}
+```
+
+### 3. Common Issues
+
+**Plugin not loading:**
+
+- Check manifest.json syntax
+- Verify minSupVersion compatibility
+- Look for errors in console
+
+**API methods failing:**
+
+- Check if method is available in current context
+- Verify permissions in manifest
+- If `executeNodeScript` fails on startup or cold boot, wrap your init code in
+  `plugin.onReady(async () => { ... })` — this ensures the Node.js bridge is ready before
+  your code runs
+
+**Iframe not displaying:**
+
+- Check that all resources are inlined
+- Verify no external dependencies
+- Look for CSP violations in console
+
+## Resources
+
+- **Plugin API Types**: [@super-productivity/plugin-api](https://www.npmjs.com/package/@super-productivity/plugin-api) ([source](../packages/plugin-api/src/types.ts))
+- **Plugin Starter**: [plugin-starter](../packages/plugin-starter)
+- **Plugin Boilerplate**: [boilerplate-solid-js](../packages/plugin-dev/boilerplate-solid-js)
+- **Example Plugins**: [plugin-dev](../packages/plugin-dev)
+- **Community Plugins**: [community-plugins.json](../src/assets/community-plugins.json), also listed in Settings → Plugins
+
+## Contributing
+
+If you create a useful plugin, consider:
+
+1. Posting on reddit or GitHub discussions about it
+2. [Getting it listed in the app](#get-listed-in-the-app)
+
+### Get Listed in the App
+
+Settings → Plugins shows a **Community Plugins** list read from
+[community-plugins.json](../src/assets/community-plugins.json), which ships with
+the app. To be listed, open a PR that adds an entry:
+
+```json
+{
+  "name": "My Plugin",
+  "shortDescription": "One or two sentences on what it does.",
+  "url": "https://github.com/you/my-plugin",
+  "author": "you",
+  "authorUrl": "https://github.com/you",
+  "id": "my-plugin",
+  "release": {
+    "version": "1.0.0",
+    "downloadUrl": "https://github.com/you/my-plugin/releases/download/v1.0.0/plugin.zip",
+    "sha256": "<output of: sha256sum plugin.zip>"
+  }
+}
+```
+
+- `id` and `release` are optional. Without them the entry links to your page and
+  users install the ZIP by hand (Settings → Plugins → Choose Plugin File).
+- `id` must equal the `id` in your `manifest.json`. With it, the list shows
+  **Installed** for users who have the plugin.
+- With `release`, the list shows an **Install** button. The app downloads
+  `downloadUrl`, refuses the file unless its SHA-256 matches `sha256`, then
+  installs it with the usual risk warning. `version` must equal the manifest
+  `version` and be numeric (`1.2.0`).
+- To ship an update, open a PR that bumps `version`, `downloadUrl` and
+  `sha256`. Users who have an older version see **Update** once the app release
+  that contains the new listing reaches them.
+- The `Community Plugins` CI check downloads each release and verifies its size
+  (10 MB max), hash, and manifest `id` and `version`; `npm run lint` checks the
+  file's shape.
+- The desktop and mobile apps install in-app. The web app shows a **Download**
+  link to `downloadUrl` instead, because release hosts such as GitHub and
+  Codeberg send no CORS headers; the user then installs the ZIP by hand.
+- A listing is not a review: the list says that community plugins are not
+  reviewed, and the hash only proves the file is the one listed.
+
+Happy plugin development! 🚀
+
+## Bonus: Vibe Coding your Plugins
+
+The quickest way is in the app: **Help** → **Build your own plugin** writes the
+prompt below for you, installs the AI's answer and hands load errors back to the
+AI. Its prompt is based on the rules below and includes the `types.ts` of your
+version, so the AI needs no web access; when you change a rule, update both
+(`src/app/plugins/ui/dialog-build-plugin/build-plugin.util.ts`).
+
+### Tips
+
+- Don't test on your real world data! Use a test instance! (you can use https://test-app.super-productivity.com/ if you don't know how get one)
+- Be as specific as possible
+- Outline what APIs your plugin should use
+- Give the assistant [`types.ts`](../packages/plugin-api/src/types.ts): it is the complete, current API, while this guide only covers the most used parts. If the assistant can't open links, paste the file into the chat
+- Test for errors (`Ctrl+Shift+i` opens the console) and iterate until it works. Don't expect that everything works on your first try. When the plugin uses a `PluginAPI` method that does not exist, the console names the closest real ones: paste that line back to the assistant
+- Read the code! Don't trust it blindly.
+
+### Example
+
+The rules in the prompt are the mistakes assistants make most often. Keep them
+even for a small plugin.
+
+```md
+Write me a plugin for Super Productivity that plays a beep sound every time I click on a header button.
+
+The API (the global PluginAPI object): https://raw.githubusercontent.com/super-productivity/super-productivity/master/packages/plugin-api/src/types.ts
+If you can't open that link, ask me to paste the file instead of guessing.
+A working starter: https://github.com/super-productivity/super-productivity/tree/master/packages/plugin-starter
+
+Rules:
+
+- Only use PluginAPI members and hooks defined in types.ts. If something is not possible with them, say so instead of inventing a method.
+- manifest.json needs id (lowercase letters, numbers and dashes), name, version, "manifestVersion": 1, minSupVersion, "hooks": [] (registerHook works without listing hooks there) and "permissions": [].
+- plugin.js is not a module: no import/export, no top-level await. Put async startup code in PluginAPI.onReady(async () => { ... }).
+- Header buttons, menu entries, shortcuts and side panel buttons can only be registered from plugin.js, not from index.html.
+- A UI goes in index.html with "iFrame": true in the manifest. Inline all CSS and JavaScript; other files are not served to it.
+- Hook handlers get one payload object, e.g. registerHook(PluginAPI.Hooks.TASK_COMPLETE, ({ taskId, task }) => { ... }).
+- Most methods return Promises: await them.
+- Store data with PluginAPI.persistDataSynced(string) and loadSyncedData(), not localStorage.
+- PluginAPI.request needs "http" in permissions and the host in "allowedHosts".
+
+Give me the files and a flat ZIP (manifest.json at the top level, not inside a folder).
+```

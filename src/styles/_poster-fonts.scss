@@ -1,0 +1,21 @@
+// Eisenhower fork: the fonts of the Poster theme. Themes are pure CSS and may
+// not reference files, so the faces are declared here and only used (and only
+// downloaded) while the theme names them. OFL licensed, see assets/fonts/poster.
+@font-face {
+  font-family: 'Anton';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/poster/anton-latin-400-normal.woff2') format('woff2');
+}
+
+@each $weight in (400, 500, 600) {
+  @font-face {
+    font-family: 'Archivo Narrow';
+    font-style: normal;
+    font-weight: $weight;
+    font-display: swap;
+    src: url('../assets/fonts/poster/archivo-narrow-latin-#{$weight}-normal.woff2')
+      format('woff2');
+  }
+}

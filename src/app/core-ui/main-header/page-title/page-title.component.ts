@@ -1,0 +1,655 @@
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  viewChild,
+} from '@angular/core';
+import { NavigationEnd, Router, RouterLink } from '@angular/router';
+import { MatRipple } from '@angular/material/core';
+import { MatTooltip } from '@angular/material/tooltip';
+import { MatIconButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { MatMenuTrigger } from '@angular/material/menu';
+import { WorkContextMenuComponent } from '../../work-context-menu/work-context-menu.component';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
+import { T } from '../../../t.const';
+import { BreakpointObserver } from '@angular/cdk/layout';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { of } from 'rxjs';
+import { filter, map, switchMap } from 'rxjs/operators';
+import { Store } from '@ngrx/store';
+import { WorkContextService } from '../../../features/work-context/work-context.service';
+import { WorkContextType } from '../../../features/work-context/work-context.model';
+import { DEFAULT_PROJECT_ICON } from '../../../features/project/project.const';
+import { NAV_SECTION_ICON } from '../../magic-side-nav/nav-section-icons.const';
+import { isSingleEmoji } from '../../../util/extract-first-emoji';
+import { selectIsProjectSharedOnPlainspace } from '../../../features/issue/store/issue-provider.selectors';
+import { PlainspaceShareService } from '../../../features/issue/providers/plainspace/plainspace-share.service';
+import { TaskViewCustomizerService } from '../../../features/task-view-customizer/task-view-customizer.service';
+import { TaskViewCustomizerPanelComponent } from '../../../features/task-view-customizer/task-view-customizer-panel/task-view-customizer-panel.component';
+import { GlobalConfigService } from '../../../features/config/global-config.service';
+import { KeyboardConfig } from '@sp/keyboard-config';
+import { PluginBridgeService } from '../../../plugins/plugin-bridge.service';
+import { PluginService } from '../../../plugins/plugin.service';
+import { PluginIconComponent } from '../../../plugins/ui/plugin-icon/plugin-icon.component';
+import { selectAllBoards } from '../../../features/boards/store/boards.selectors';
+import {
+  getViewIcon,
+  getViewLayoutSwitch,
+  translateViewTitle,
+} from '../../../features/boards/boards.util';
+import { BoardCfg } from '../../../features/boards/boards.model';
+import { ViewMenuComponent } from '../../../features/boards/view-menu/view-menu.component';
+import { BoardsService } from '../../../features/boards/boards.service';
+import { LayoutService } from '../../layout/layout.service';
+
+@Component({
+  selector: 'page-title',
+  standalone: true,
+  imports: [
+    RouterLink,
+    MatRipple,
+    MatTooltip,
+    MatIconButton,
+    MatIcon,
+    MatMenuTrigger,
+    WorkContextMenuComponent,
+    ViewMenuComponent,
+    TaskViewCustomizerPanelComponent,
+    TranslatePipe,
+    PluginIconComponent,
+  ],
+  template: `
+    @if (activeWorkContextTypeAndId()) {
+      <!-- On a view page the title opens the view's editor and stays put;
+           elsewhere it links to the task list. One element either way: the
+           static tabindex makes it a tab stop on every page (RouterLink leaves
+           a static tabindex alone), and a null routerLink lets the click
+           through to onTitleClick(). -->
+      <div
+        [matTooltip]="
+          (viewBoard() ? T.F.BOARDS.V.EDIT_BOARD : T.MH.GO_TO_TASK_LIST) | translate
+        "
+        class="page-title"
+        mat-ripple
+        tabindex="0"
+        [routerLink]="viewBoard() ? null : '/active/tasks'"
+        [attr.role]="viewBoard() ? 'button' : null"
+        (click)="onTitleClick()"
+        (keydown.enter)="onTitleClick()"
+        (keydown.space)="onTitleClick($event)"
+      >
+        @if (sectionIcon(); as icon) {
+          <!-- Same icon the side nav shows for this section; it inherits the
+               title color, as the nav's route icons inherit theirs. -->
+          <mat-icon class="page-title-icon">{{ icon }}</mat-icon>
+        } @else if (pluginId(); as id) {
+          <plugin-icon
+            class="page-title-icon"
+            [pluginId]="id"
+            [size]="20"
+            [fallbackIcon]="pluginFallbackIcon()"
+          ></plugin-icon>
+        } @else if (activeWorkContext()) {
+          <mat-icon
+            class="page-title-icon"
+            [class.page-title-icon--emoji]="isContextEmojiIcon()"
+            [style.color]="contextIconColor()"
+            >{{ contextIcon() }}</mat-icon
+          >
+        }
+        <span class="page-title-text">{{ displayTitle() }}</span>
+      </div>
+      @if (!isXxxs() && !isSpecialSection()) {
+        <div class="page-title-actions">
+          @if (isSharedOnPlainspace()) {
+            <button
+              (click)="openInPlainspace()"
+              [matTooltip]="T.PLAINSPACE.OPEN_IN_PLAINSPACE | translate"
+              [attr.aria-label]="T.PLAINSPACE.OPEN_IN_PLAINSPACE | translate"
+              mat-icon-button
+            >
+              <mat-icon svgIcon="plainspace"></mat-icon>
+            </button>
+          }
+          <button
+            [matMenuTriggerFor]="workContextMenu.menu()"
+            [matTooltip]="T.MH.PROJECT_MENU | translate"
+            [attr.aria-label]="T.MH.PROJECT_MENU | translate"
+            class="project-settings-btn"
+            mat-icon-button
+          >
+            <mat-icon>more_vert</mat-icon>
+          </button>
+          <!-- In its trigger's block, for the same reason as the customizer
+               panel's below. -->
+          <work-context-menu
+            #workContextMenu
+            [contextId]="activeWorkContextTypeAndId()!.activeId"
+            [contextType]="activeWorkContextTypeAndId()!.activeType"
+          ></work-context-menu>
+          @if (isWorkViewPage()) {
+            <button
+              #customizerMenuTrigger
+              class="task-filter-btn"
+              [class.isCustomized]="taskViewCustomizerService.isCustomized()"
+              [matMenuTriggerFor]="customizerPanel.menu"
+              [attr.aria-label]="
+                T.GCF.KEYBOARD.TOGGLE_TASK_VIEW_CUSTOMIZER_PANEL | translate
+              "
+              mat-icon-button
+              matTooltip="{{
+                T.GCF.KEYBOARD.TOGGLE_TASK_VIEW_CUSTOMIZER_PANEL | translate
+              }} {{
+                kb.toggleTaskViewCustomizerPanel
+                  ? '[' + kb.toggleTaskViewCustomizerPanel + ']'
+                  : ''
+              }}"
+            >
+              <mat-icon>filter_list</mat-icon>
+            </button>
+            <!-- Inside the trigger's own block, which is a constraint rather
+                 than a preference: a template reference declared in a sibling
+                 @if is not in scope here, so moving it out silently breaks the
+                 trigger's customizerPanel.menu binding. It costs the row
+                 nothing anyway -- it renders only into the overlay and its host
+                 is display: contents, so it is not a flex item and charges no
+                 gap. Sharing the condition also keeps it uninstantiated on the
+                 views that have no trigger for it. -->
+            <task-view-customizer-panel #customizerPanel></task-view-customizer-panel>
+          }
+        </div>
+      }
+      @if (!isXxxs() && viewBoard(); as board) {
+        <div class="page-title-actions">
+          <!-- List/Board: first, so it stays under the pointer when the
+               list-only filter button comes or goes. These blocks stay
+               rendered across the switch (their aliases update), so the
+               button keeps the focus. Phones show every view as a list and
+               keep the title bar to the view's name and its ⋮ menu: more
+               buttons left the title a word ("Open …") at 360px. The title
+               opens the editor, which also sets the layout. -->
+          @if (!isXs() && viewLayoutSwitch(); as layoutSwitch) {
+            <button
+              class="view-layout-btn"
+              (click)="toggleViewLayout(board)"
+              [matTooltip]="layoutSwitch.label | translate"
+              [attr.aria-label]="layoutSwitch.label | translate"
+              mat-icon-button
+            >
+              <mat-icon>{{ layoutSwitch.icon }}</mat-icon>
+            </button>
+          }
+          <!-- Where a list has its filter/sort button, a list-layout view
+               has one that opens the view editor, like its title: the
+               editor covers every rule. Boards with several columns use
+               their title and column titles; phones the title. -->
+          @if (board.cols <= 1 && !isXs()) {
+            <button
+              class="task-filter-btn"
+              (click)="editView(board)"
+              [attr.aria-label]="T.F.BOARDS.V.EDIT_BOARD | translate"
+              mat-icon-button
+              matTooltip="{{ T.F.BOARDS.V.EDIT_BOARD | translate }} {{
+                kb.toggleTaskViewCustomizerPanel
+                  ? '[' + kb.toggleTaskViewCustomizerPanel + ']'
+                  : ''
+              }}"
+            >
+              <mat-icon>filter_list</mat-icon>
+            </button>
+          }
+          <button
+            [matMenuTriggerFor]="viewMenu.menu()"
+            [matTooltip]="T.G.MORE_ACTIONS | translate"
+            [attr.aria-label]="T.G.MORE_ACTIONS | translate"
+            mat-icon-button
+          >
+            <mat-icon>more_vert</mat-icon>
+          </button>
+          <view-menu
+            #viewMenu
+            [board]="board"
+          ></view-menu>
+        </div>
+      }
+    }
+  `,
+  styles: [
+    `
+      :host {
+        display: contents;
+        --page-title-icon-size: 20px;
+      }
+
+      .page-title {
+        display: flex;
+        align-items: center;
+        gap: var(--s-half);
+        font-size: var(--font-size-xl);
+        font-weight: var(--font-weight-semibold);
+        letter-spacing: var(--letter-spacing-tight);
+        overflow: hidden;
+        max-width: 100%;
+        cursor: pointer;
+        border-radius: var(--card-border-radius);
+        /* Inline padding comes from main-header, which owns the row's spacing
+           scale and reads these same tokens back when it sizes the row. The
+           fallbacks only apply if this component is ever mounted outside the
+           header. */
+        /* Logical, because the tokens are named logically and the row is
+           RTL-correct by construction elsewhere. As a physical shorthand the
+           "inline-end" token landed on the physical right, so RTL got the two
+           swapped. */
+        padding-block: var(--s);
+        padding-inline: var(--header-title-padding-inline-start, var(--s))
+          var(--header-title-padding-inline-end, var(--s2));
+
+        /* The title yields before the action row does, so a long context name
+           ellipsizes instead of pushing the buttons off screen (#7477). This
+           used to be expressed by making the nav unshrinkable, but the nav now
+           has to be able to shrink in order to scroll as a last resort
+           (#9480) — so the priority is stated here instead. Both are
+           shrinkable; the title just absorbs essentially all of it, down to the
+           floor below. */
+        flex-shrink: 999;
+
+        /* Keep enough of the name to tell which context this is, however tight
+           the row gets. The title yields first (flex-shrink: 999 above), so
+           without a floor it is squeezed to nothing to buy one more action: a
+           320px project name measured 70px at an 800px window and 2px at
+           600px. What the title refuses to give up comes out of the action row,
+           which scrolls -- so this costs scroll, never a lost button.
+
+           It has to be on THIS box and not on the text inside it. A flex item
+           with overflow hidden may shrink below its content's minimum, so a
+           floor on .page-title-text alone leaves the text at its full 6ch while
+           this box collapses to its padding and clips it -- measured: a 40px
+           box around a 60px span, i.e. the floor bought nothing.
+
+           Declared by main-header, which owns the row's spacing scale and the
+           breakpoint it changes at; the fallback only applies if this component
+           is ever mounted outside the header.
+
+           The cost, stated plainly: a hard floor cannot also hug short content
+           -- CSS has no min() over max-content -- so a title under six
+           characters gets 12-18px of box it does not fill. That is a fifth of
+           what the flat 160px floor this replaces cost ("Today" lost 77px to
+           it), and it buys the guarantee above.
+
+           BORDER-box, and deliberately left that way: the app sets
+           box-sizing: border-box globally, so this box's own inline padding
+           (8px above 600px) comes out of the floor and the name gets the token
+           minus that. Padding it back out was tried and is not affordable --
+           at 650px with the right panel open, the floor plus the title's own
+           action buttons already fill the wrapper, and the extra 8px pushes
+           the nav past the header's clip edge, which is the #9480 failure this
+           row exists to avoid. So the token is a floor on the BOX: read it as
+           "about six characters", not as an exact promise to the name. */
+        min-width: var(--header-title-text-min, 0px);
+
+        &:focus {
+          outline: none;
+        }
+
+        /* Inset: the header row clips anything drawn outside the title box. */
+        &:focus-visible {
+          outline: var(--focus-ring-width) solid var(--focus-ring-color);
+          outline-offset: calc(-1 * var(--focus-ring-width));
+        }
+      }
+
+      /* The floor is stated as "how much of the NAME survives", so where the
+         icon shares the box it is added on top -- otherwise six characters of
+         floor buy three characters of name. A :has() selector rather than a
+         class, because the icon's own template condition already decides this;
+         where :has() is unsupported the floor degrades to a smaller one rather
+         than breaking. */
+      .page-title:has(.page-title-icon) {
+        min-width: calc(
+          var(--header-title-text-min, 0px) + var(--page-title-icon-size) + var(--s-half)
+        );
+      }
+
+      .page-title-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+
+      /* Mirrors the side-nav icon so the same project/tag or section reads
+         identically in the nav and the header (icon value, emoji handling and
+         theme/tag color). See nav-item.component. */
+      /* One source for the size: the title's floor has to add this box on top
+         of the name it reserves, so a change here must reach that calc. */
+      .page-title-icon {
+        flex: 0 0 auto;
+        font-size: var(--page-title-icon-size);
+        width: var(--page-title-icon-size);
+        height: var(--page-title-icon-size);
+        line-height: var(--page-title-icon-size);
+        overflow: visible;
+
+        &.page-title-icon--emoji {
+          font-family:
+            'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+          font-size: 18px;
+          font-feature-settings: normal;
+          font-variation-settings: normal;
+          text-transform: none;
+          letter-spacing: normal;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+        }
+      }
+
+      .page-title-actions {
+        display: flex;
+        align-items: center;
+        /* Don't let the menu/filter buttons shrink; the title absorbs the
+           squeeze instead (#7477). */
+        flex: 0 0 auto;
+        gap: var(--header-title-action-gap, var(--s-quarter));
+        margin-left: calc(-1 * var(--header-title-actions-inset, var(--s)));
+        margin-right: var(--header-title-actions-gutter, var(--s2));
+      }
+
+      .project-settings-btn {
+        opacity: 1;
+        color: var(--text-color-muted);
+
+        /*display: none;*/
+        /*@media (min-width: 600px) {*/
+        /*  display: block;*/
+        /*  transition: var(--transition-standard);*/
+        /*  opacity: 0;*/
+        /*  position: relative;*/
+        /*  z-index: 1;*/
+        /*}*/
+
+        /*&:hover,*/
+        /*.page-title:hover + .page-title-actions &,*/
+        /*.page-title-actions:hover & {*/
+        /*  opacity: 1;*/
+        /*}*/
+      }
+
+      .task-filter-btn {
+        position: relative;
+        color: var(--text-color-muted);
+        transition: all var(--transition-duration-m) ease;
+        overflow: visible !important;
+
+        .mat-icon {
+          transition: transform var(--transition-duration-m) ease;
+          display: block;
+        }
+
+        &.isCustomized {
+          color: var(--c-accent);
+          box-shadow: none;
+        }
+
+        &:hover:not(.isCustomized):not(:disabled) {
+          background-color: var(--state-hover);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          background: transparent !important;
+        }
+      }
+
+      :host-context(.wrapper:hover) .project-settings-btn,
+      :host-context(.wrapper:hover) .task-filter-btn:not(.isCustomized),
+      :host-context(.wrapper:focus-within) .project-settings-btn,
+      :host-context(.wrapper:focus-within) .task-filter-btn:not(.isCustomized),
+      .page-title-actions:is(:hover, :focus-within) .project-settings-btn,
+      .page-title-actions:is(:hover, :focus-within) .task-filter-btn:not(.isCustomized) {
+        color: var(--text-color);
+      }
+
+      .project-settings-btn[aria-expanded='true'] {
+        color: var(--brand);
+      }
+    `,
+  ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PageTitleComponent {
+  private _breakpointObserver = inject(BreakpointObserver);
+  private _router = inject(Router);
+  private _workContextService = inject(WorkContextService);
+  readonly taskViewCustomizerService = inject(TaskViewCustomizerService);
+  private readonly _configService = inject(GlobalConfigService);
+  private _translateService = inject(TranslateService);
+  private _store = inject(Store);
+  private _boards = this._store.selectSignal(selectAllBoards);
+  private _plainspaceShareService = inject(PlainspaceShareService);
+  private _pluginBridge = inject(PluginBridgeService);
+  private _pluginService = inject(PluginService);
+  private _boardsService = inject(BoardsService);
+
+  readonly T = T;
+
+  private _langChange = toSignal(this._translateService.onLangChange, {
+    initialValue: null,
+  });
+
+  // On the work view; absent elsewhere (and on xxxs screens), where the
+  // shortcut then does nothing — matching the button not being there to click.
+  private _customizerMenuTrigger = viewChild('customizerMenuTrigger', {
+    read: MatMenuTrigger,
+  });
+
+  constructor() {
+    // On a list-layout view the shortcut does what its filter button does.
+    this.taskViewCustomizerService.openMenuRequest$
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => {
+        const board = this.viewBoard();
+        if (board && board.cols <= 1 && !this.isXxxs()) {
+          this.editView(board);
+        } else {
+          this._customizerMenuTrigger()?.openMenu();
+        }
+      });
+  }
+
+  // Get data directly from services instead of inputs
+  activeWorkContextTitle = toSignal(this._workContextService.activeWorkContextTitle$);
+  activeWorkContextTypeAndId = toSignal(
+    this._workContextService.activeWorkContextTypeAndId$,
+  );
+  // Full active context — drives the header icon (icon value, theme/tag color,
+  // emoji detection). Mirrors the side-nav treatment for visual consistency.
+  activeWorkContext = toSignal(this._workContextService.activeWorkContext$);
+
+  // Whether the active project is shared on Plainspace — drives the visible
+  // "Open in Plainspace" header button. Uses the same shared-detection selector
+  // as the Collaborate-on-Plainspace menu entry. False for tags/special
+  // sections, so the button stays project-only.
+  isSharedOnPlainspace = toSignal(
+    this._workContextService.activeWorkContextTypeAndId$.pipe(
+      switchMap(({ activeId, activeType }) =>
+        activeType === WorkContextType.PROJECT
+          ? this._store.select(selectIsProjectSharedOnPlainspace(activeId))
+          : of(false),
+      ),
+    ),
+    { initialValue: false },
+  );
+
+  // Single source for the current URL path — all route-derived signals compute off this.
+  // Query and fragment are stripped so end-anchored matchers work for e.g. `/config#plugins`.
+  private _url$ = this._router.events.pipe(
+    filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+    map((event) => event.urlAfterRedirects.split(/[?#]/, 1)[0]),
+  );
+  private _url = toSignal(this._url$, {
+    initialValue: this._router.url.split(/[?#]/, 1)[0],
+  });
+
+  // Routes that get their own title and icon and have no work-context menu.
+  // Order is irrelevant — patterns are mutually exclusive end-anchors.
+  private static readonly _ROUTE_SECTIONS: ReadonlyArray<
+    readonly [RegExp, string, string]
+  > = [
+    [/schedule$/, T.MH.SCHEDULE, NAV_SECTION_ICON.SCHEDULE],
+    [/planner$/, T.MH.PLANNER, NAV_SECTION_ICON.PLANNER],
+    // `/boards` or one view, `/boards/<id>` (titled with the view, see below).
+    [/^\/boards(\/[^/]+)?$/, T.MH.BOARDS, NAV_SECTION_ICON.BOARDS],
+    [/habits$/, T.MH.HABITS, NAV_SECTION_ICON.HABITS],
+    [/search$/, T.MH.SEARCH, NAV_SECTION_ICON.SEARCH],
+    [/scheduled-list$/, T.WW.RECURRING_TASKS, NAV_SECTION_ICON.RECURRING_TASKS],
+    [/donate$/, T.MH.DONATE, NAV_SECTION_ICON.DONATE],
+    [/config$/, T.PS.GLOBAL_SETTINGS, NAV_SECTION_ICON.SETTINGS],
+    [/archived-projects$/, T.MH.ARCHIVED_PROJECTS, NAV_SECTION_ICON.ARCHIVED_PROJECTS],
+  ];
+
+  private _routeSection = computed(() =>
+    PageTitleComponent._ROUTE_SECTIONS.find(([re]) => re.test(this._url())),
+  );
+  private _routeTitleKey = computed(() => this._routeSection()?.[1]);
+  sectionIcon = computed(() => {
+    const viewBoard = this.viewBoard();
+    return viewBoard ? getViewIcon(viewBoard) : this._routeSection()?.[2];
+  });
+
+  // Plugin pages are titled like the built-in sections, with the label and
+  // icon of the plugin's nav entry.
+  pluginId = computed(() => this._url().match(/^\/plugins\/([^/]+)\/index$/)?.[1]);
+  private _pluginMenuEntry = computed(() => {
+    const id = this.pluginId();
+    return id
+      ? this._pluginBridge.menuEntries().find((e) => e.pluginId === id)
+      : undefined;
+  });
+  pluginFallbackIcon = computed(() => {
+    const icon = this._pluginMenuEntry()?.icon;
+    // An SVG path is not a Material icon name.
+    return icon && !/\.svg$/i.test(icon) ? icon : 'extension';
+  });
+
+  // The view (board) a `/boards/<id>` page shows: titled with its own title
+  // (default views use keys) and icon, with its menu in the title bar.
+  viewBoard = computed(() => {
+    const id = this._url().match(/^\/boards\/([^/]+)$/)?.[1];
+    return id
+      ? this._boards().find((board) => board.id === decodeURIComponent(id))
+      : undefined;
+  });
+  private _boardTitle = computed(() => this.viewBoard()?.title);
+
+  isSpecialSection = computed(() => !!this._routeSection() || !!this.pluginId());
+  isWorkViewPage = computed(() => /tasks$/.test(this._url()));
+
+  displayTitle = computed(() => {
+    // Eisenhower fork: the board's own title, from the Poster look.
+    if (this._url() === '/boards/EISENHOWER_MATRIX') {
+      return 'Lock in.';
+    }
+    const boardTitle = this._boardTitle();
+    if (boardTitle) {
+      return translateViewTitle(boardTitle, (k) => this._translateService.instant(k));
+    }
+    const key = this._routeTitleKey();
+    if (key) {
+      this._langChange();
+      return this._translateService.instant(key);
+    }
+    const pluginId = this.pluginId();
+    if (pluginId) {
+      // No menu entry when the manifest sets isSkipMenuEntry.
+      return (
+        this._pluginMenuEntry()?.label ??
+        this._pluginService.getAllPluginStates().get(pluginId)?.manifest.name ??
+        pluginId
+      );
+    }
+    return this.activeWorkContextTitle();
+  });
+
+  // Icon shown next to the title, defaulting the same way the nav does
+  // (`list_alt` for projects, `label` for tags) when none is set.
+  contextIcon = computed<string>(() => {
+    const wc = this.activeWorkContext();
+    if (!wc) {
+      return DEFAULT_PROJECT_ICON;
+    }
+    const defaultIcon = wc.type === WorkContextType.TAG ? 'label' : DEFAULT_PROJECT_ICON;
+    return wc.icon || defaultIcon;
+  });
+
+  isContextEmojiIcon = computed<boolean>(() => isSingleEmoji(this.contextIcon()));
+
+  // Same color rule as the side nav: tag color wins, else the theme primary;
+  // null (inherit) when neither is set. Emoji ignore the color anyway.
+  contextIconColor = computed<string | null>(() => {
+    const wc = this.activeWorkContext();
+    if (!wc) {
+      return null;
+    }
+    if (wc.type === WorkContextType.TAG) {
+      // `color` lives on Tag only; WorkContext doesn't surface it in its type.
+      const tagColor = (wc as { color?: string | null }).color;
+      if (tagColor) {
+        return tagColor;
+      }
+    }
+    return wc.theme?.primary || null;
+  });
+
+  private _isXxxs$ = this._breakpointObserver.observe('(max-width: 350px)');
+  isXxxs = toSignal(this._isXxxs$.pipe(map((result) => result.matches)), {
+    initialValue: false,
+  });
+  // Phones (the bottom-nav layout), from the real viewport on the first
+  // render: a view's title bar is its name and its ⋮ menu only.
+  readonly isXs = inject(LayoutService).isXs;
+
+  /** The List/Board switch of the open view: the other mode. */
+  viewLayoutSwitch = computed(() => {
+    const board = this.viewBoard();
+    return board ? getViewLayoutSwitch(board) : undefined;
+  });
+
+  get kb(): KeyboardConfig {
+    return (this._configService.cfg()?.keyboard as KeyboardConfig) || {};
+  }
+
+  /**
+   * Click, Enter or Space on the title: opens the editor on a view page,
+   * where the title is a button; elsewhere the router link (click) is all.
+   */
+  onTitleClick(ev?: Event): void {
+    const board = this.viewBoard();
+    if (!board) {
+      return;
+    }
+    // Space would scroll the page.
+    ev?.preventDefault();
+    void this._boardsService.editBoard(board);
+  }
+
+  /** A list-layout view's filter button (and its shortcut): the editor. */
+  editView(board: BoardCfg): void {
+    void this._boardsService.editBoard(board);
+  }
+
+  /** The title bar's List/Board button: the open view in the other mode. */
+  toggleViewLayout(board: BoardCfg): void {
+    this._boardsService.setViewLayout(board, getViewLayoutSwitch(board).layout);
+  }
+
+  openInPlainspace(): void {
+    const active = this.activeWorkContextTypeAndId();
+    if (active) {
+      void this._plainspaceShareService.openProjectOnPlainspace(active.activeId);
+    }
+  }
+}

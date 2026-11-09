@@ -1,0 +1,85 @@
+@use '../../../../styles/_globals.scss' as *;
+
+:host {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-auto-rows: 1fr;
+  gap: var(--s2);
+  padding: var(--s2);
+  max-height: 100%;
+  min-height: 100%;
+  position: relative;
+  overflow: auto;
+
+  @include mq(xs, max) {
+    grid-template-columns: repeat(1, 1fr);
+  }
+}
+
+:host(.isSingleColumn) {
+  width: 100%;
+  max-width: var(--component-max-width);
+  margin: 0 auto;
+}
+
+// Sections of one list: as tall as their rows, not equal grid rows.
+:host(.isListLayout) {
+  grid-auto-rows: auto;
+  align-content: start;
+  // Flat sections have no lines at their edges; space separates them.
+  row-gap: var(--s2);
+}
+
+// Above the columns, across all of them, as tall as its text (the cards'
+// rows share the height that is left). :has() rather than a host class: the
+// callout stays in the DOM while it collapses, and a class flipped at removal
+// would stretch it to a `1fr` row for that time.
+:host:has(> .missing-tags) {
+  grid-template-rows: auto;
+}
+
+.missing-tags {
+  grid-column: 1 / -1;
+}
+
+.room-map {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s);
+}
+
+.room {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 3px solid var(--q-accent, var(--brand));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--q-accent, var(--brand)) 9%, var(--surface-2));
+  color: var(--q-accent, var(--brand));
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.room-name {
+  font-weight: 600;
+}
+
+.room-count {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.empty-board-msg {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+
+  .msg {
+    margin-bottom: var(--s2);
+  }
+}

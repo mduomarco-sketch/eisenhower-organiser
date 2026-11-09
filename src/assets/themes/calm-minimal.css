@@ -1,0 +1,400 @@
+/**
+ * Poster: her own look, drawn from what she saves.
+ *
+ * Huge black condensed type, one cherry red, square corners, a black menu.
+ * Light + dark (follows the app's dark-mode setting). The theme keeps the id
+ * and file name `calm-minimal` so every device that already uses it updates.
+ * Pure CSS only: the fonts are declared in src/styles/_poster-fonts.scss.
+ */
+
+/* ───────────────────────── Light mode ───────────────────────── */
+body {
+  --surface-1: #f0f0ee;
+  --surface-2: #ffffff;
+  --ink: #0a0a0a;
+  --ink-on-channel: 10, 10, 10;
+
+  --surface-0: #e4e4e1;
+  --surface-3: #ffffff;
+  --surface-4: #ffffff;
+  --ink-strong: #000000;
+  --ink-muted: #5c5c58;
+  --separator: rgba(10, 10, 10, 0.16);
+  --divider: rgba(10, 10, 10, 0.16);
+  --scrim: rgba(0, 0, 0, 0.55);
+
+  --brand: #b5001f;
+  --c-primary: #b5001f;
+  --focus-ring: #b5001f;
+
+  --poster-line: #0a0a0a;
+  --q-do: #b5001f;
+  --q-do-ink: #ffffff;
+  --q-plan: #0a0a0a;
+  --q-plan-ink: #ffffff;
+  --q-delegate: #ffffff;
+  --q-delegate-ink: #0a0a0a;
+  --q-drop: #dadad6;
+  --q-drop-ink: #0a0a0a;
+}
+
+/* ───────────────────────── Dark mode ───────────────────────── */
+body.isDarkTheme {
+  --surface-1: #0a0a0a;
+  --surface-2: #171717;
+  --ink: #f5f5f2;
+  --ink-on-channel: 245, 245, 242;
+
+  --surface-0: #000000;
+  --surface-3: #1f1f1f;
+  --surface-4: #262626;
+  --ink-strong: #ffffff;
+  --ink-muted: #a8a8a2;
+  --separator: rgba(245, 245, 242, 0.2);
+  --divider: rgba(245, 245, 242, 0.2);
+  --scrim: rgba(0, 0, 0, 0.7);
+
+  --brand: #e3173e;
+  --c-primary: #e3173e;
+  --focus-ring: #ff5c78;
+
+  --poster-line: #f5f5f2;
+  --q-do: #c9082c;
+  --q-do-ink: #ffffff;
+  --q-plan: #f5f5f2;
+  --q-plan-ink: #0a0a0a;
+  --q-delegate: #2a2a2a;
+  --q-delegate-ink: #ffffff;
+  --q-drop: #1c1c1c;
+  --q-drop-ink: #cfcfc9;
+}
+
+/* ───────────────────── Shared ───────────────────── */
+body,
+body.isDarkTheme {
+  --state-hover-alpha: 0.06;
+  --state-focus-alpha: 0.1;
+  --state-selected-alpha: 0.08;
+
+  --card-border-radius: 0;
+  --task-border-radius: 0;
+  --radius-s: 0;
+  --radius-m: 0;
+  --radius-l: 0;
+  --radius-xl: 0;
+  --card-shadow: none;
+  --banner-shadow: none;
+  --task-detail-shadow: none;
+  --extra-border-color: var(--separator);
+  --separator-color: var(--separator);
+
+  --font-size-sm: 13px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+
+  /* The menu and the bottom bar are black in both modes. */
+  --sidenav-bg: #0a0a0a;
+  --sidenav-bg-mobile: #0a0a0a;
+  --bottom-nav-bg: #0a0a0a;
+  --sidenav-text: #ffffff;
+  --sidenav-text-hover: #ffffff;
+  --sidenav-text-secondary: #bdbdb8;
+  --sidenav-active-text: #ffffff;
+  --sidenav-item-active-bg: #b5001f;
+  --sidenav-hover-bg: rgba(255, 255, 255, 0.14);
+
+  --poster-display: 'Anton', Impact, 'Arial Narrow', sans-serif;
+  --font-primary-stack:
+    'Archivo Narrow', 'Arial Narrow', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+
+  font-family: var(--font-primary-stack);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body button,
+body input,
+body textarea,
+body select,
+body .mat-mdc-button,
+body .mat-mdc-menu-item,
+body .mat-mdc-menu-item-text,
+body .mat-mdc-form-field,
+body .mat-mdc-dialog-content,
+body .mat-mdc-tab .mdc-tab__text-label {
+  font-family: var(--font-primary-stack) !important;
+}
+
+/* Square corners everywhere */
+body .mat-mdc-dialog-surface,
+body .mat-mdc-menu-panel,
+body .mat-mdc-card,
+body .mat-mdc-snack-bar-container .mdc-snackbar__surface,
+body .mat-mdc-button,
+body .mat-mdc-unelevated-button,
+body .mat-mdc-raised-button,
+body .mat-mdc-outlined-button,
+body .mat-mdc-fab,
+body .mdc-text-field,
+body .mdc-text-field--filled,
+body add-task-bar .bar-wrapper,
+body add-task-bar > *,
+body tag,
+body tag .tag,
+body note .note {
+  border-radius: 0 !important;
+}
+
+body .mat-mdc-dialog-surface,
+body .mat-mdc-menu-panel {
+  background: var(--surface-2) !important;
+  border: 2px solid var(--poster-line);
+  box-shadow: none !important;
+}
+
+body note .note {
+  border: 2px solid var(--poster-line);
+  box-shadow: none !important;
+}
+
+/* ───────────────────── Display type ───────────────────── */
+body .page-title-text,
+body .mat-mdc-dialog-title,
+body board-panel header .title,
+body board-panel[data-room] .collapsible-title,
+body .room,
+body planner-day .day-title,
+body task-detail-panel .task-title,
+body task-detail-panel .title,
+body magic-side-nav .nav-label {
+  font-family: var(--poster-display) !important;
+  font-weight: 400 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+
+body .page-title-text {
+  font-size: 30px !important;
+  line-height: 1.1;
+}
+
+body magic-side-nav .nav-label {
+  font-size: 19px;
+}
+
+/* The menu is black in light mode too, so everything on it is white. */
+body magic-side-nav mat-icon,
+body magic-side-nav .mat-mdc-icon-button,
+body magic-side-nav button,
+body magic-side-nav a {
+  color: #ffffff !important;
+}
+
+body magic-side-nav a,
+body magic-side-nav button,
+body magic-side-nav .nav-link {
+  border-radius: 0 !important;
+}
+
+/* Square checkboxes, like a printed form */
+body done-toggle .done-shape {
+  rx: 0;
+  ry: 0;
+}
+
+/* Details: the same type as the rest of the app */
+body task-detail-panel *:not(mat-icon):not(.material-icons) {
+  font-family: var(--font-primary-stack);
+}
+
+body .tour-addBtn mat-icon {
+  color: var(--brand) !important;
+}
+
+/* ───────────────────── Bottom bar and header ───────────────────── */
+body mobile-bottom-nav .nav-button,
+body mobile-bottom-nav .nav-button mat-icon {
+  color: #ffffff !important;
+}
+
+body mobile-bottom-nav .add-task-button {
+  background: #b5001f !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+body plugin-header-btns button {
+  border-radius: 0 !important;
+}
+
+@media (max-width: 599px) {
+  body plugin-header-btns button {
+    background: var(--ink) !important;
+  }
+
+  body plugin-header-btns button mat-icon {
+    color: var(--surface-1) !important;
+  }
+}
+
+/* ───────────────────── Eisenhower ───────────────────── */
+body board-panel[data-board-selection-scope='URGENT_AND_IMPORTANT'],
+body [data-room='URGENT_AND_IMPORTANT'] {
+  --q-accent: var(--q-do);
+  --q-ink: var(--q-do-ink);
+}
+body board-panel[data-board-selection-scope='NOT_URGENT_AND_IMPORTANT'],
+body [data-room='NOT_URGENT_AND_IMPORTANT'] {
+  --q-accent: var(--q-plan);
+  --q-ink: var(--q-plan-ink);
+}
+body board-panel[data-board-selection-scope='URGENT_AND_NOT_IMPORTANT'],
+body [data-room='URGENT_AND_NOT_IMPORTANT'] {
+  --q-accent: var(--q-delegate);
+  --q-ink: var(--q-delegate-ink);
+}
+body board-panel[data-board-selection-scope='NOT_URGENT_AND_NOT_IMPORTANT'],
+body [data-room='NOT_URGENT_AND_NOT_IMPORTANT'] {
+  --q-accent: var(--q-drop);
+  --q-ink: var(--q-drop-ink);
+}
+
+/* Laptop and iPad: four solid blocks. Text inside follows each block. */
+body
+  board-panel:is(
+    [data-board-selection-scope='URGENT_AND_IMPORTANT'],
+    [data-board-selection-scope='NOT_URGENT_AND_IMPORTANT'],
+    [data-board-selection-scope='URGENT_AND_NOT_IMPORTANT'],
+    [data-board-selection-scope='NOT_URGENT_AND_NOT_IMPORTANT']
+  ) {
+  --text-color: var(--q-ink);
+  --text-color-most-intense: var(--q-ink);
+  --text-color-less-intense: var(--q-ink);
+  --text-color-muted: var(--q-ink);
+  --ink: var(--q-ink);
+  --ink-strong: var(--q-ink);
+  --ink-muted: var(--q-ink);
+  --card-bg: transparent;
+  --task-c-bg: transparent;
+  --separator-color: var(--q-ink);
+  --divider-color: var(--q-ink);
+  --c-warn: var(--q-ink);
+  color: var(--q-ink);
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--q-accent);
+}
+
+body board-panel[data-board-selection-scope] mat-icon,
+body board-panel[data-board-selection-scope] .mat-mdc-icon-button {
+  color: var(--q-ink, var(--ink)) !important;
+}
+
+body board-panel[data-board-selection-scope] planner-task {
+  background: transparent !important;
+  color: var(--q-ink, var(--ink));
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+body board-panel[data-board-selection-scope] .time-badge {
+  background: var(--q-accent, var(--surface-2)) !important;
+  color: var(--q-ink, var(--ink)) !important;
+}
+
+body
+  board-panel[data-board-selection-scope]
+  [data-scheduled-date-color='overdue']
+  .time-badge {
+  background: var(--q-ink, var(--brand)) !important;
+  color: var(--q-accent, #ffffff) !important;
+}
+
+/* Other boards, such as Kanban: plain panels with a hard edge. */
+body board-panel:not(.isListLayout) {
+  border: 2px solid var(--poster-line) !important;
+  border-radius: 0 !important;
+  box-shadow: none;
+}
+
+body
+  board-panel:is(
+    [data-board-selection-scope='URGENT_AND_IMPORTANT'],
+    [data-board-selection-scope='NOT_URGENT_AND_IMPORTANT'],
+    [data-board-selection-scope='URGENT_AND_NOT_IMPORTANT'],
+    [data-board-selection-scope='NOT_URGENT_AND_NOT_IMPORTANT']
+  ) {
+  border: 0 !important;
+}
+
+body board-panel header .title {
+  font-size: 32px;
+  line-height: 1.05;
+  color: var(--q-ink, var(--ink));
+}
+
+body board:not(.isListLayout) {
+  gap: 8px;
+  padding: 8px;
+}
+
+/* Phone: map tiles */
+body board .room-map {
+  gap: 6px;
+}
+
+body board .room-map .room {
+  align-items: flex-end;
+  min-height: 88px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--q-accent);
+  color: var(--q-ink);
+}
+
+body board .room-map .room-name {
+  max-width: 70%;
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1.05;
+  text-align: start;
+}
+
+body board .room-map .room-count {
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+/* Phone: stacked sections */
+body board-panel[data-room] .collapsible-title {
+  font-size: 26px;
+  color: var(--ink);
+}
+
+body board-panel[data-room='URGENT_AND_IMPORTANT'] .collapsible-title,
+body board-panel[data-room='URGENT_AND_IMPORTANT'] .collapsible-count {
+  color: var(--brand);
+}
+
+body board-panel[data-room] .collapsible-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+body board-panel[data-room] task {
+  --separator-color: var(--poster-line);
+  border-bottom: 2px solid var(--poster-line);
+}
+
+body .phone-due {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+body .phone-due.isLate {
+  color: var(--brand);
+}

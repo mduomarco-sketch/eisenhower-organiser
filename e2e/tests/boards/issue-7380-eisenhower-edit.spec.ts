@@ -1,0 +1,62 @@
+import { expect, test } from '../../fixtures/test.fixture';
+import {
+  columnTitleButton,
+  saveViewEditor,
+  setViewSort,
+  viewEditorSection,
+  viewRuleChip,
+} from '../../utils/view-helpers';
+
+/**
+ * Regression for #7380: editing the default Eisenhower Matrix view and saving
+ * it must work. The Formly editor once left Save disabled there (a required
+ * match-mode radio never got its default); the view editor keeps Save enabled
+ * and saves a tag rule without a match mode as "all".
+ */
+test.describe('Boards — Eisenhower Matrix edit dialog (#7380)', () => {
+  test('saves the default view after changing a sort', async ({ page, workViewPage }) => {
+    await workViewPage.waitForTaskList();
+
+    // The Eisenhower Matrix board ships with `cols: 2` and four panels.
+    await page.goto('/#/boards/EISENHOWER_MATRIX');
+    await expect(page.locator('boards')).toBeVisible({ timeout: 10000 });
+
+    // Default Eisenhower Matrix references Important / Urgent tags that
+    // don't exist in a fresh profile — the panels render with a "Create Tags"
+    // prompt above them; create the tags if it is shown.
+    const createTagsBtn = page.locator('button', { hasText: /create tags?/i });
+    if (await createTagsBtn.isVisible().catch(() => false)) {
+      await createTagsBtn.click();
+    }
+
+    // Open the edit dialog via the first column's title.
+    const firstColumnTitle = columnTitleButton(
+      page.locator('board-panel').first(),
+      'Urgent & Important',
+    );
+    await expect(firstColumnTitle).toBeVisible({ timeout: 10000 });
+    await firstColumnTitle.click();
+
+    const dialog = page.locator('dialog-board-edit');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+
+    // The first quadrant requires two tags: its rule shows both, matching all.
+    const first = viewEditorSection(dialog, 0);
+    await viewRuleChip(first, 'Required Tags').click();
+    await expect(
+      page.getByRole('menuitemradio', { name: 'Match all (AND)', exact: true }),
+    ).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mat-mdc-menu-panel')).toHaveCount(0);
+
+    await setViewSort(page, first, 'Title');
+    await saveViewEditor(dialog);
+
+    // The sort is stored on that quadrant.
+    await firstColumnTitle.click();
+    await expect(
+      viewEditorSection(dialog, 0).getByRole('button', { name: /^Sort by: / }),
+    ).toContainText('Title');
+  });
+});

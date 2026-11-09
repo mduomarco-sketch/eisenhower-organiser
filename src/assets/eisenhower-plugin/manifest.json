@@ -1,0 +1,24 @@
+{
+  "name": "Calendar",
+  "id": "eisenhower-ai",
+  "manifestVersion": 1,
+  "version": "1.0.0",
+  "minSupVersion": "13.0.0",
+  "description": "Shows your Google Calendar and turns the tasks in the \"Tareas\" calendar into tasks tagged Urgent / Important, as classified by Claude every 12 hours.",
+  "hooks": ["taskComplete", "persistedDataChanged"],
+  "permissions": [
+    "deleteTask",
+    "getTasks",
+    "addTask",
+    "updateTask",
+    "getAllTags",
+    "addTag",
+    "showIndexHtmlAsView"
+  ],
+  "dataSharing": [],
+  "iFrame": true,
+  "sidePanel": false,
+  "type": "standard",
+  "assets": [],
+  "icon": "icon.svg"
+}

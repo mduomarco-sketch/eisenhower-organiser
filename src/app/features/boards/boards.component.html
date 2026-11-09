@@ -1,0 +1,20 @@
+@if (board(); as board) {
+  <board
+    [@viewSwitch]="{ value: switchState(), params: switchParams() }"
+    (@viewSwitch.done)="onSwitchDone($event.toState)"
+    [boardCfg]="board"
+    cdkDropListGroup
+  ></board>
+} @else if (!boardId()) {
+  <div class="no-views">
+    <p>{{ T.F.BOARDS.V.NO_VIEWS_MSG | translate }}</p>
+    <button
+      mat-flat-button
+      color="primary"
+      (click)="boardsService.createBoard()"
+    >
+      <mat-icon>add</mat-icon>
+      {{ T.F.BOARDS.V.NO_VIEWS_BTN | translate }}
+    </button>
+  </div>
+}

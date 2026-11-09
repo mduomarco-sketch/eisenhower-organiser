@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Calendar</title>
+    <style>
+      .page {
+        max-width: 860px;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--s);
+        flex-wrap: wrap;
+      }
+      .toolbar .range {
+        flex: 1;
+        text-align: center;
+        font-weight: var(--font-weight-semibold);
+      }
+      .day {
+        margin-top: var(--s2);
+      }
+      .day h2 {
+        font-size: var(--font-size-md, 1rem);
+        margin: 0 0 var(--s-half);
+        color: var(--text-color-muted);
+        font-weight: var(--font-weight-semibold);
+      }
+      .day h2::first-letter {
+        text-transform: uppercase;
+      }
+      .day.is-today h2 {
+        color: var(--c-primary);
+      }
+      .ev {
+        display: grid;
+        grid-template-columns: 4px 88px 1fr;
+        gap: var(--s);
+        align-items: start;
+        padding: var(--s) var(--s);
+        border-radius: var(--radius-m, 8px);
+        background: var(--card-bg);
+        border: 1px solid var(--divider-color);
+        margin-bottom: var(--s-half);
+      }
+      .ev .bar {
+        align-self: stretch;
+        border-radius: 2px;
+      }
+      .ev .time {
+        font-variant-numeric: tabular-nums;
+        color: var(--text-color-muted);
+        font-size: var(--font-size-sm, 0.875rem);
+      }
+      .ev .title {
+        font-weight: var(--font-weight-medium);
+        overflow-wrap: anywhere;
+      }
+      .ev .meta {
+        color: var(--text-color-muted);
+        font-size: var(--font-size-sm, 0.875rem);
+        margin-top: 2px;
+        overflow-wrap: anywhere;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .q {
+        font-size: var(--font-size-xs, 0.75rem);
+        padding: 1px 8px;
+        border-radius: var(--radius-pill, 999px);
+        border: 1px solid var(--divider-color);
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--s);
+        font-size: var(--font-size-sm, 0.875rem);
+        color: var(--text-color-muted);
+      }
+      .legend label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .updated {
+        font-size: var(--font-size-xs, 0.75rem);
+        color: var(--text-color-muted);
+        text-align: center;
+        margin-top: var(--s3);
+      }
+      @media (max-width: 480px) {
+        .ev {
+          grid-template-columns: 4px 64px 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="page-header">
+        <h1>Calendar</h1>
+      </header>
+
+      <div class="toolbar">
+        <button
+          class="btn-icon"
+          id="prev"
+          aria-label="Previous week"
+        >
+          <span
+            class="material-icons"
+            aria-hidden="true"
+            >chevron_left</span
+          >
+        </button>
+        <button
+          class="btn-text"
+          id="today"
+        >
+          Today
+        </button>
+        <div
+          class="range"
+          id="range"
+        ></div>
+        <button
+          class="btn-icon"
+          id="next"
+          aria-label="Next week"
+        >
+          <span
+            class="material-icons"
+            aria-hidden="true"
+            >chevron_right</span
+          >
+        </button>
+      </div>
+
+      <div
+        class="legend"
+        id="legend"
+      ></div>
+      <div id="content"><div class="spinner"></div></div>
+      <div
+        class="updated"
+        id="updated"
+      ></div>
+    </main>
+
+    <script>
+      (() => {
+        // The app's fonts, loaded from its own origin.
+        const fontUrl = (f) =>
+          new URL(`assets/fonts/poster/${f}`, window.parent.document.baseURI);
+        const fontStyle = document.createElement('style');
+        fontStyle.textContent = `
+          @font-face { font-family: 'Anton'; src: url('${fontUrl('anton-latin-400-normal.woff2')}') format('woff2'); font-display: swap; }
+          @font-face { font-family: 'Archivo Narrow'; font-weight: 400; src: url('${fontUrl('archivo-narrow-latin-400-normal.woff2')}') format('woff2'); font-display: swap; }
+          @font-face { font-family: 'Archivo Narrow'; font-weight: 600; src: url('${fontUrl('archivo-narrow-latin-600-normal.woff2')}') format('woff2'); font-display: swap; }
+          body { font-family: 'Archivo Narrow', 'Arial Narrow', sans-serif; }
+          h1, .day h2 { font-family: 'Anton', Impact, sans-serif; font-weight: 400; text-transform: uppercase; }
+          h1 { font-size: 46px; line-height: 1.05; margin: 0; }
+          .day h2 { font-size: 23px; color: inherit; }
+          .day.is-today h2 { color: var(--c-primary); }
+          .ev { border: 0 !important; border-bottom: 2px solid currentColor !important; background: transparent !important; border-radius: 0 !important; font-size: 17px; }
+          .q { border-radius: 0 !important; }
+        `;
+        document.head.appendChild(fontStyle);
+
+        const TZ = 'Europe/Madrid';
+        const PALETTE = [
+          '#4f7d74',
+          '#b5835a',
+          '#6c7fb8',
+          '#a15c7a',
+          '#7a8f4e',
+          '#8a6fb0',
+        ];
+        const Q_LABEL = {
+          ui: 'Urgent · Important',
+          i: 'Important',
+          u: 'Urgent',
+          n: 'Neither urgent nor important',
+        };
+        const Q_COLOR = { ui: '#c0564b', i: '#4f7d74', u: '#c08a3e', n: '#8a877f' };
+
+        let data = null;
+        let prio = new Map();
+        let hidden = new Set();
+        let weekStart = startOfWeek(new Date());
+
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) =>
+          String(s ?? '').replace(
+            /[&<>"']/g,
+            (c) =>
+              ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+                c
+              ],
+          );
+
+        function baseUrl() {
+          try {
+            return window.parent.document.baseURI;
+          } catch {
+            return window.location.origin + '/';
+          }
+        }
+        async function getJson(file) {
+          const url = new URL(
+            `static/eisenhower-data/${file}?ngsw-bypass=true&t=${Date.now()}`,
+            baseUrl(),
+          );
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`${file}: HTTP ${res.status}`);
+          return res.json();
+        }
+
+        function dayKey(date) {
+          // YYYY-MM-DD in Madrid time
+          return new Intl.DateTimeFormat('en-CA', {
+            timeZone: TZ,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          }).format(date);
+        }
+        function startOfWeek(d) {
+          // The 7-day window starts today, not on Monday.
+          const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          return x;
+        }
+        function addDays(d, n) {
+          const x = new Date(d);
+          x.setDate(x.getDate() + n);
+          return x;
+        }
+        const fmtTime = (iso) =>
+          new Intl.DateTimeFormat('en-GB', {
+            timeZone: TZ,
+            hour: '2-digit',
+            minute: '2-digit',
+          }).format(new Date(iso));
+        const fmtDay = (d) =>
+          new Intl.DateTimeFormat('en-GB', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          }).format(d);
+        const fmtShort = (d) =>
+          new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(d);
+
+        function calColor(name) {
+          const cal = (data.calendars || []).find((c) => c.name === name);
+          if (cal && cal.color) return cal.color;
+          const idx = (data.calendars || []).findIndex((c) => c.name === name);
+          return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length];
+        }
+
+        // Events of a given Madrid day, including multi-day all-day events.
+        function eventsOn(key) {
+          return (data.events || [])
+            .filter((e) => !hidden.has(e.calendar))
+            .filter((e) => {
+              if (e.allDay) {
+                const s = e.start.slice(0, 10);
+                const end = (e.end || e.start).slice(0, 10);
+                return key >= s && (key < end || key === s);
+              }
+              return dayKey(new Date(e.start)) === key;
+            })
+            .sort((a, b) =>
+              a.allDay === b.allDay ? a.start.localeCompare(b.start) : a.allDay ? -1 : 1,
+            );
+        }
+
+        function renderLegend() {
+          $('legend').innerHTML = (data.calendars || [])
+            .map(
+              (c) => `<label>
+                <input type="checkbox" data-cal="${esc(c.name)}" ${hidden.has(c.name) ? '' : 'checked'} />
+                <span class="dot" style="background:${esc(calColor(c.name))}"></span>${esc(c.name)}
+              </label>`,
+            )
+            .join('');
+          $('legend')
+            .querySelectorAll('input')
+            .forEach((el) =>
+              el.addEventListener('change', () => {
+                const name = el.getAttribute('data-cal');
+                el.checked ? hidden.delete(name) : hidden.add(name);
+                render();
+              }),
+            );
+        }
+
+        function render() {
+          const end = addDays(weekStart, 6);
+          $('range').textContent = `${fmtShort(weekStart)} – ${fmtShort(end)}`;
+          const todayKey = dayKey(new Date());
+          let html = '';
+          for (let i = 0; i < 7; i++) {
+            const d = addDays(weekStart, i);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const evs = eventsOn(key);
+            html += `<section class="day ${key === todayKey ? 'is-today' : ''}"><h2>${esc(fmtDay(d))}${key === todayKey ? ' · today' : ''}</h2>`;
+            if (!evs.length) {
+              html += `<p class="text-muted text-sm">Nothing</p>`;
+            }
+            for (const e of evs) {
+              const p = prio.get(e.id);
+              const qk = p
+                ? p.urgent && p.important
+                  ? 'ui'
+                  : p.important
+                    ? 'i'
+                    : p.urgent
+                      ? 'u'
+                      : 'n'
+                : null;
+              const time = e.allDay
+                ? 'All day'
+                : `${fmtTime(e.start)}${e.end ? '–' + fmtTime(e.end) : ''}`;
+              html += `<div class="ev">
+                <span class="bar" style="background:${esc(calColor(e.calendar))}"></span>
+                <span class="time">${esc(time)}</span>
+                <div>
+                  <div class="title">${esc(e.title || '(untitled)')}</div>
+                  ${e.location ? `<div class="meta">${esc(e.location)}</div>` : ''}
+                  ${e.description ? `<div class="meta">${esc(e.description)}</div>` : ''}
+                  ${
+                    qk
+                      ? `<div class="chips"><span class="q" style="border-color:${Q_COLOR[qk]};color:${Q_COLOR[qk]}">${Q_LABEL[qk]}</span></div>
+                         ${p.reason ? `<div class="meta">${esc(p.reason)}</div>` : ''}`
+                      : ''
+                  }
+                </div>
+              </div>`;
+            }
+            html += `</section>`;
+          }
+          $('content').innerHTML = html;
+          $('updated').textContent = data.generatedAt
+            ? `Updated ${new Date(data.generatedAt).toLocaleString('en-GB')} · refreshes every 12 h`
+            : '';
+        }
+
+        async function load() {
+          try {
+            data = await getJson('calendar.json');
+          } catch (e) {
+            $('content').innerHTML =
+              '<div class="callout callout--warning"><p>No calendar data yet. Claude updates it every 12 hours.</p></div>';
+            return;
+          }
+          try {
+            const p = await getJson('priorities.json');
+            prio = new Map((p.tasks || []).map((t) => [t.eventId, t]));
+          } catch {
+            prio = new Map();
+          }
+          renderLegend();
+          render();
+        }
+
+        $('prev').addEventListener('click', () => {
+          weekStart = addDays(weekStart, -7);
+          data && render();
+        });
+        $('next').addEventListener('click', () => {
+          weekStart = addDays(weekStart, 7);
+          data && render();
+        });
+        $('today').addEventListener('click', () => {
+          weekStart = startOfWeek(new Date());
+          data && render();
+        });
+
+        load();
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+# EXAMPLE: copy this file to .github/workflows/deploy.yml in your own PRIVATE repo.
+# It is kept here (not in .github/) so that no GitHub Actions run in this public copy.
+# Builds the web app and uploads it to Cloudflare Pages on every push to main
+# (including the Claude routine's data commits every 12 h).
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run buildFrontend:prodWeb
+
+      # functions/ at the repo root (Pages Functions, e.g. /api/sync) is picked
+      # up automatically because wrangler runs from the repo root.
+      - name: Upload to Cloudflare Pages
+        run: npx --yes wrangler@4 pages deploy dist/browser --project-name=eisenhower --branch=main --commit-hash=${{ github.sha }} --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

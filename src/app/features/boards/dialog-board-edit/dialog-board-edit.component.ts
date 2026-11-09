@@ -1,0 +1,67 @@
+import { ChangeDetectionStrategy, Component, inject, viewChild } from '@angular/core';
+import {
+  MAT_DIALOG_DATA,
+  MatDialog,
+  MatDialogActions,
+  MatDialogRef,
+} from '@angular/material/dialog';
+import { T } from '../../../t.const';
+import { BoardEditComponent } from '../board-edit/board-edit.component';
+import { BoardCfg } from '../boards.model';
+import { MatButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { TranslatePipe } from '@ngx-translate/core';
+import { DialogConfirmComponent } from '../../../ui/dialog-confirm/dialog-confirm.component';
+
+@Component({
+  selector: 'dialog-board-edit',
+  standalone: true,
+  imports: [MatDialogActions, BoardEditComponent, MatButton, MatIcon, TranslatePipe],
+  templateUrl: './dialog-board-edit.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class DialogBoardEditComponent {
+  private _matDialogRef = inject<MatDialogRef<DialogBoardEditComponent>>(MatDialogRef);
+  private _matDialog = inject(MatDialog);
+
+  data = inject<{
+    board: BoardCfg;
+    // Creates a new view: no Delete button, create title.
+    isCreate?: boolean;
+    // Translation keys shown above the form, e.g. what "Save as view" drops.
+    hints?: string[];
+    // The section or column shown open (default: the first).
+    openPanelId?: string;
+  }>(MAT_DIALOG_DATA);
+  boarEditCmp = viewChild('boarEditCmp', { read: BoardEditComponent });
+
+  close(savedBoardId?: string): void {
+    this._matDialogRef.close(savedBoardId);
+  }
+
+  protected readonly T = T;
+
+  removeBoard(): void {
+    this._matDialog
+      .open(DialogConfirmComponent, {
+        restoreFocus: true,
+        data: {
+          cancelTxt: T.G.CANCEL,
+          okTxt: T.G.DELETE,
+          message: T.F.BOARDS.V.CONFIRM_DELETE,
+        },
+      })
+      .afterClosed()
+      .subscribe((isConfirm: boolean) => {
+        if (isConfirm) {
+          this.boarEditCmp()?.removeBoard();
+          this.close();
+        }
+      });
+  }
+
+  save(): void {
+    // Closes through `afterSave`; with an invalid field the editor shows why.
+    this.boarEditCmp()?.save();
+  }
+}

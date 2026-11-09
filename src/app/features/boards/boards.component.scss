@@ -1,0 +1,17 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+board {
+  flex: 1;
+}
+
+.no-views {
+  max-width: var(--component-max-width);
+  margin: auto;
+  padding: var(--s2);
+  text-align: center;
+}

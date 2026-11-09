@@ -1,0 +1,13 @@
+/*
+ * Procrastination Buster Plugin Styles
+ * Layout, cards, buttons and text come from the plugin UI kit; only
+ * centering of intro blocks and the cycle diagram is plugin-specific.
+ */
+
+.intro {
+  text-align: center;
+}
+
+.procrastination-graph {
+  justify-content: center;
+}

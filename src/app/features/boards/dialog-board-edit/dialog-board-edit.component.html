@@ -1,0 +1,40 @@
+<!-- The editor renders the title (the view's name) and the content. -->
+@if (data.board) {
+  <board-edit
+    #boarEditCmp
+    [board]="data.board"
+    [openPanelId]="data.openPanelId"
+    [hints]="data.hints ?? []"
+    (afterSave)="close($event)"
+  ></board-edit>
+}
+
+<mat-dialog-actions align="end">
+  <button
+    (click)="close()"
+    mat-button
+  >
+    {{ T.G.CANCEL | translate }}
+  </button>
+
+  @if (!data.isCreate) {
+    <button
+      (click)="removeBoard()"
+      mat-button
+      color="warn"
+    >
+      <mat-icon>delete_forever</mat-icon>
+      {{ T.G.DELETE | translate }}
+    </button>
+  }
+
+  <button
+    (click)="save()"
+    color="primary"
+    mat-flat-button
+    type="submit"
+  >
+    <mat-icon>save</mat-icon>
+    {{ T.G.SAVE | translate }}
+  </button>
+</mat-dialog-actions>

@@ -1,0 +1,20 @@
+{
+  "name": "Super Productivity Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "npm ci",
+  "postStartCommand": "npm run startFrontend",
+  "forwardPorts": [4200],
+  "portsAttributes": {
+    "4200": {
+      "label": "Angular Dev Server",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/kreemer/features/chrometesting:1": {}
+  },
+  "containerEnv": {
+    "CHROME_BIN": "/opt/chrome/chrome"
+  }
+}

@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Super Productivity</title>
+
+    <!--
+      interactive-widget=resizes-content makes the virtual keyboard shrink the
+      *layout* viewport on mobile web (Chrome/Android) instead of only the
+      visual viewport (the default `resizes-visual`). This mirrors what the
+      native builds already do — Android `adjustResize` and iOS Keyboard
+      `resize: 'native'` both resize the WebView — so the fixed global add-task
+      bar (position: fixed; bottom) re-anchors above the keyboard on the web app
+      the same way it does natively. Ignored where it doesn't apply: native
+      WebViews (keyboard handled natively), iOS Safari (unsupported → falls back
+      to the JS `--keyboard-height` visualViewport tracking), and desktop.
+
+      viewport-fit=cover is load-bearing on Android beyond the notch: Capacitor's
+      SystemBars only passes real insets through (WebView >= 140) when it reads it
+      back from this tag, and capacitor.config.ts promises it up front via
+      SystemBars.initialViewportFitValueHint: 'cover' — change both together. See
+      NativeInsetShimGate and docs/android-edge-to-edge-keyboard.md.
+    -->
+    <meta
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+      name="viewport"
+    />
+    <link
+      href="favicon.ico"
+      rel="shortcut icon"
+      type="image/x-icon"
+    />
+    <link
+      href="assets/icons/apple-touch-icon.png"
+      rel="apple-touch-icon"
+      sizes="180x180"
+    />
+    <link
+      href="assets/icons/favicon-16x16.png"
+      rel="icon"
+      sizes="16x16"
+      type="image/png"
+    />
+    <link
+      href="assets/icons/favicon-32x32.png"
+      rel="icon"
+      sizes="32x32"
+      type="image/png"
+    />
+    <link
+      href="assets/icons/favicon-192x192.png"
+      rel="icon"
+      sizes="192x192"
+      type="image/png"
+    />
+    <link
+      color="#5bbad5"
+      href="assets/icons/safari-pinned-tab.svg"
+      rel="mask-icon"
+    />
+
+    <meta
+      content="assets/icons/s/mstile-150x150.png"
+      name="msapplication-TileImage"
+    />
+    <meta
+      content="#0b77d2"
+      name="msapplication-TileColor"
+    />
+
+    <!-- use-credentials: the site is behind Cloudflare Access, so the manifest
+         must be fetched with the login cookie or the app can't be installed. -->
+    <link
+      crossorigin="use-credentials"
+      href="manifest.json"
+      rel="manifest"
+    />
+    <meta
+      content="#0b77d2"
+      name="theme-color"
+    />
+    <meta
+      content="yes"
+      name="mobile-web-app-capable"
+    />
+    <meta
+      content="#2b5797"
+      name="msapplication-TileColor"
+    />
+    <meta
+      content="assets/icons/browserconfig.xml"
+      name="msapplication-config"
+    />
+    <!-- Content-Security-Policy. See GHSA-78rv-m663-4fph.
+      'unsafe-eval' and 'unsafe-inline' currently CANNOT be dropped:
+        - the plugin runtime runs plugin code via `new Function`
+          (src/app/plugins/plugin-runner.ts) → needs 'unsafe-eval';
+        - the inline browser-compat bootstrap <script> below also uses
+          `new Function` and is inline → needs both.
+      The packaged app loads the renderer over file:// (electron/main-window.ts),
+      where 'self' is an opaque origin, so tightening script-src to 'self' is
+      unreliable. A real lockdown (dropping unsafe-inline/unsafe-eval) needs:
+      a registered app:// scheme instead of file://, plugin execution moved into
+      a sandboxed iframe/worker, and the inline bootstrap externalized.
+      object-src 'none' is safe to set now (the app embeds no <object>/<embed>).
+      @see https://content-security-policy.com/ -->
+    <meta
+      content="default-src * uploaded:;
+          connect-src * data: blob: filesystem: uploaded:;
+          frame-src * data: blob:;
+          font-src * data:;
+          img-src * data: blob: filesystem: file:;
+          style-src * 'unsafe-inline' ;
+          object-src 'none';
+          script-src * 'self' 'unsafe-inline' 'unsafe-eval' blob:"
+      http-equiv="Content-Security-Policy"
+    />
+    <base href="./" />
+    <script>
+      // Launch screen: paint the app's frame (background, bottom bar space)
+      // before any JS bundle runs, so the app looks open at once and its
+      // content arrives in place. Colors come from the last session's frame
+      // (launch-frame.ts, LS.LAUNCH_FRAME), the nav geometry from the side
+      // nav's own keys; the defaults below cover a first launch.
+      (function () {
+        var root = document.documentElement;
+        var get = function (key) {
+          try {
+            return localStorage.getItem(key);
+          } catch (e) {
+            return null;
+          }
+        };
+        // LS.DARK_MODE: 'dark' | 'light' | 'system' (GlobalThemeService)
+        var mode = get('DARK_MODE');
+        if (mode === 'dark' || mode === 'light') {
+          root.setAttribute('data-sp-mode', mode);
+        }
+        var isDark =
+          mode === 'dark' ||
+          (mode !== 'light' &&
+            !!window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+        // LS.LAST_BOOT_MS (boot-splash.ts): the last start was quick, so this
+        // one likely is too; a tip would not stay up long enough to be read.
+        var lastBootMs = parseInt(get('SUP_LAST_BOOT_MS'), 10);
+        if (!isNaN(lastBootMs) && lastBootMs < 2000) {
+          root.setAttribute('data-sp-quick-boot', '');
+        }
+
+        // Mirrors MagicSideNavComponent: 190–400px, default 260, collapsed 56.
+        var width = parseInt(get('SUP_NAV_SIDEBAR_WIDTH'), 10);
+        width = isNaN(width) ? 260 : Math.max(190, Math.min(400, width));
+        var isCollapsed = get('SUP_NAV_SIDEBAR_EXPANDED') === 'false';
+        root.style.setProperty('--sp-nav-w', (isCollapsed ? 56 : width) + 'px');
+
+        try {
+          var frame = JSON.parse(get('SUP_LAUNCH_FRAME') || '{}')[
+            isDark ? 'dark' : 'light'
+          ];
+          if (frame) {
+            root.style.setProperty('--sp-bg', frame.bg);
+            root.style.setProperty('--sp-fg', frame.fg);
+            if (frame.backdrop) {
+              root.style.setProperty('--sp-backdrop', frame.backdrop);
+            }
+            if (frame.bottomBar) {
+              root.style.setProperty('--sp-bottom', frame.bottomBar + 'px');
+            }
+            if (frame.isRtl) {
+              root.setAttribute('data-sp-rtl', '');
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style type="text/css">
+      /* Defaults: the default theme's --bg and text colors, and
+         the 44px phone bottom bar (MobileBottomNavComponent). */
+      :root {
+        --sp-bg: #131314;
+        --sp-fg: #e6e6e6;
+        --sp-backdrop: none;
+        --sp-nav-w: 260px;
+        --sp-bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root:not([data-sp-mode='dark']) {
+          --sp-bg: #f8f8f7;
+          --sp-fg: #2c2c2c;
+        }
+      }
+
+      :root[data-sp-mode='light'] {
+        --sp-bg: #f8f8f7;
+        --sp-fg: #2c2c2c;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: var(--sp-bg);
+        color: var(--sp-fg);
+      }
+
+      /* A sibling of <app-root>, so bootstrapping does not wipe it. When the
+         shell renders, on phones it uncovers the bottom bar and keeps covering
+         only the content area (showShellUnderBootSplash); once data is loaded,
+         it fades out (fadeOutBootSplash, both in AppComponent). z-index stays
+         below the CDK overlay (1000): startup dialogs show above it. */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        background: var(--sp-bg);
+        color: var(--sp-fg);
+        cursor: grab;
+        -webkit-app-region: drag;
+        /* Short: the content below is ready; the fade only softens the cut. */
+        transition: opacity 180ms cubic-bezier(0.4, 0, 1, 1);
+      }
+
+      #app-splash::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: var(--sp-backdrop);
+        pointer-events: none;
+      }
+
+      #app-splash:active {
+        cursor: grabbing;
+      }
+
+      /* Phones: steps back to the content area, so the bottom bar can slide
+         up and be used while data loads. Below the navs
+         (--z-mobile-bottom-nav 50, --z-side-nav 60): the add task button
+         reaches up into the content area. Desktop keeps the whole window
+         covered: the side nav shows as the splash fades out. */
+      @media (max-width: 599px) {
+        #app-splash.is-shell-shown {
+          z-index: 49;
+          background: none;
+          pointer-events: none;
+          -webkit-app-region: no-drag;
+        }
+
+        #app-splash.is-shell-shown::before {
+          display: none;
+        }
+
+        /* Fixed, so the backdrop lines up with the app's full-window one. */
+        #app-splash.is-shell-shown .app-loading {
+          background:
+            var(--sp-backdrop) fixed,
+            var(--sp-bg);
+          pointer-events: auto;
+          -webkit-app-region: drag;
+        }
+      }
+
+      #app-splash.is-hiding {
+        opacity: 0;
+        pointer-events: none;
+        -webkit-app-region: no-drag;
+      }
+
+      /* The content area, where the page will appear. The tip is shifted back
+         by half the nav (--sp-shift), so it sits centred in the window. */
+      .app-loading {
+        --sp-shift: calc(var(--sp-nav-w) / -2);
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: var(--sp-nav-w);
+        right: 0;
+      }
+
+      [data-sp-rtl] .app-loading {
+        --sp-shift: calc(var(--sp-nav-w) / 2);
+        left: 0;
+        right: var(--sp-nav-w);
+      }
+
+      @media (max-width: 599px) {
+        /* Above where the bottom bar will be. */
+        .app-loading,
+        [data-sp-rtl] .app-loading {
+          --sp-shift: 0px;
+          left: 0;
+          right: 0;
+          bottom: var(--sp-bottom);
+        }
+
+        /* No nav beside it here: the full width is free. */
+        .app-loading .productivity-tip {
+          max-width: calc(100% - 48px);
+        }
+      }
+
+      /* Centred on the window, not the content area: that is where the Android
+         system splash draws the same icon (android/.../drawable/ic_splash.xml),
+         whatever the bar and inset sizes, so the hand-off cannot make it jump;
+         and it stays put when the bottom bar is uncovered. */
+      .app-loading .logo {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 72px;
+        height: 72px;
+        margin: -36px 0 0 -36px;
+      }
+
+      .app-loading .logo path {
+        fill: var(--sp-fg);
+      }
+
+      .app-loading .spinner-pulse {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 112px;
+        height: 112px;
+        margin: -56px 0 0 -56px;
+        border-radius: 50%;
+        background-color: #6495ed;
+        opacity: 0;
+        animation: sp-pulse 2s ease-in-out infinite;
+      }
+
+      /* Quiet but readable. The short delay only skips near-instant starts,
+         where a tip would flash; slow starts get almost the whole load to read it.
+         Not shown at all when the last start was quick (data-sp-quick-boot):
+         the splash would be gone before it could be read. */
+      .productivity-tip {
+        position: absolute;
+        left: calc(50% + var(--sp-shift));
+        bottom: 10%;
+        width: 360px;
+        max-width: max(200px, calc(100% - 48px - var(--sp-nav-w)));
+        transform: translateX(-50%);
+        text-align: center;
+        opacity: 0.85;
+        animation: sp-fade-in 400ms cubic-bezier(0, 0, 0.2, 1) 400ms backwards;
+      }
+
+      .app-loading .productivity-tip h2#heading {
+        font:
+          500 14px/20px 'Open Sans',
+          'Helvetica Neue',
+          sans-serif;
+        margin: 0 0 4px !important;
+        color: inherit;
+      }
+
+      .app-loading .productivity-tip p {
+        font:
+          400 13px/19px 'Open Sans',
+          'Helvetica Neue',
+          sans-serif;
+        margin: 0 !important;
+      }
+
+      [data-sp-quick-boot] .productivity-tip {
+        display: none;
+      }
+
+      @keyframes sp-fade-in {
+        from {
+          opacity: 0;
+        }
+      }
+
+      @keyframes sp-pulse {
+        0%,
+        100% {
+          opacity: 0;
+          transform: scale(0.8);
+        }
+        50% {
+          opacity: 0.12;
+          transform: scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .productivity-tip,
+        .app-loading .spinner-pulse {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body class="mat-typography">
+    <app-root></app-root>
+    <div
+      id="app-splash"
+      class="loading-full-page-wrapper"
+    >
+      <div class="app-loading">
+        <div class="productivity-tip">
+          <h2 id="heading">Heading</h2>
+          <p id="text">Text</p>
+        </div>
+
+        <div class="spinner-pulse"></div>
+
+        <svg
+          class="logo"
+          viewBox="0 0 64 64"
+        >
+          <path
+            d="M 0.65537046,34.582787 32.452267,63.855301 63.791548,0.94356422 30.222644,47.722023 Z"
+            id="path3395"
+            style="
+              fill-opacity: 1;
+              fill-rule: evenodd;
+              stroke: none;
+              stroke-width: 1.46761858;
+              stroke-linecap: butt;
+              stroke-linejoin: bevel;
+              stroke-miterlimit: 13.80000019;
+              stroke-dasharray: none;
+              stroke-opacity: 1;
+            "
+          />
+        </svg>
+      </div>
+    </div>
+    <noscript>Please enable JavaScript to use this application.</noscript>
+    <script>
+      // Browser compatibility check — must use ES5 syntax only.
+      // The app targets ES2022+ (Safari 18+, Chrome 107+). On older browsers the
+      // compiled JS will fail to parse, leaving the user stuck on the splash screen.
+      // This detects unsupported browsers early and shows a helpful message.
+      (function () {
+        var unsupported = false;
+        if (typeof structuredClone !== 'function') {
+          unsupported = true;
+        }
+        if (!unsupported) {
+          try {
+            new Function('class C { static {} }')();
+          } catch (e) {
+            unsupported = true;
+          }
+        }
+        if (unsupported) {
+          var el = document.querySelector('.app-loading');
+          if (el) {
+            el.innerHTML =
+              '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);' +
+              'width:min(400px,calc(100% - 48px));text-align:center">' +
+              '<h2 style="font:500 20px/28px sans-serif;margin:0 0 16px">Browser Update Required</h2>' +
+              '<p style="font:400 14px/22px sans-serif;margin:0 0 12px">' +
+              'Super Productivity requires a newer browser version to run.' +
+              '</p>' +
+              '<p style="font:400 14px/22px sans-serif;margin:0">' +
+              'Please update your operating system or browser and try again.' +
+              '</p>' +
+              '</div>';
+          }
+        }
+      })();
+
+      var productivityTips = [
+        [
+          'Be kind',
+          'The simple act of paying positive attention to people has a great deal to do with productivity. ― Tom Peters',
+        ],
+        [
+          'Achieve something new',
+          'Productivity is being able to do things that you were never able to do before. ― Franz Kafka',
+        ],
+        [
+          'Focus on output not activity',
+          'Stressing output is the key to improving productivity, while looking to increase activity can result in just the opposite. ― Paul Gauguin',
+        ],
+        [
+          'There is only one solution to complex problems',
+          'Try and correct, try and correct, try and correct, try and correct, try and correct...',
+        ],
+        [
+          'Two step super productivity',
+          '1. Physically get in your work position. 2. Do one small thing.',
+        ],
+        ['Prioritize', 'Do first things first.'],
+        [
+          'Procrastination',
+          'Procrastination is an emotion regulation problem, not a time management problem.',
+        ],
+        [
+          "When in doubt, use the magic programmer's estimation factor",
+          'Programmers estimate task duration as π times the original estimate.',
+        ],
+        ['Be realistic', 'Almost everything will take longer than you think.'],
+        [
+          'Good is good enough',
+          "Don't aim for perfection. Focus on the important things.",
+        ],
+        [
+          'Distractions',
+          "If something is distracting you, get rid of it. If you can't get it out of your head and you can deal with it later, write it down.",
+        ],
+        ['Fun things first', 'The dopamine can get you through the rest!'],
+        [
+          'Celebrate',
+          "After completing a task, don't rush to the next. Give yourself some time to feel good about yourself!",
+        ],
+        [
+          'Establish routines',
+          'Decisions take time. So establishing routines can be very helpful.',
+        ],
+        [
+          'Take breaks',
+          'They help to clear your mind and make you more productive in the long run. Go! Take a walk!',
+        ],
+        ['Mess creates stress', 'Remove junk from your work area!'],
+        ['Focus on a single task', 'Multi-tasking is the worst.'],
+        [
+          'Set your goals',
+          'Having a goal to aim for (or even several smaller ones) increases motivation and focus. Remind yourself why you are doing something!',
+        ],
+        [
+          'Try to get it right the first time',
+          'This can help you avoid dragging a task on forever.',
+        ],
+        [
+          'We are what we repeatedly do',
+          'Excellence, then, is not an act, but a habit. ― Aristotle',
+        ],
+        [
+          "You don't learn to walk by following rules",
+          'You learn by doing, and by falling over. ― Richard Branson',
+        ],
+        ['Define each task', 'A problem well-put is half-solved ― John Dewey'],
+        [
+          "Either like what you do or know why you're doing it",
+          'If not, consider doing something else.',
+        ],
+        ['Focus on what matters', 'Wisdom is learning what to overlook ― William James'],
+        [
+          'Action overcomes fear',
+          'Better to do it than live with the fear of it. ― Logen Ninefingers',
+        ],
+        [
+          "It is not that I'm so smart",
+          'But I stay with the questions much longer. ― Albert Einstein',
+        ],
+        [
+          'You can do it',
+          'No problem can withstand the assault of sustained thinking. ― Voltaire',
+        ],
+        [
+          'I have not failed',
+          "I've just found 10,000 ways that won't work. ― Thomas A. Edison",
+        ],
+        [
+          'Review and reflect',
+          "At the end of the day or week, review your progress and reflect on what worked and what didn't. Adjust your strategies accordingly.",
+        ],
+        [
+          'Set realistic expectations',
+          "Don't overburden yourself with an unrealistic workload. Be honest about what you can accomplish in a given time frame.",
+        ],
+        [
+          'Prioritize tasks',
+          "Use techniques like the Eisenhower Matrix (urgent vs. important) to prioritize your tasks. Focus on what's most important and time-sensitive.",
+        ],
+        [
+          'Always be kind to yourself',
+          'Productivity is impossible without good self care (at the very least, in the long run).',
+        ],
+        [
+          'The path to progress is all about self evaluation',
+          'From time to time reflect if your goals and methods serve you well.',
+        ],
+        [
+          'Embrace progress over achievement',
+          "It's not about massive strides every day, but the accumulation of small, incremental progress that leads to significant achievements over time.",
+        ],
+        [
+          'Decide',
+          "You don't need more time in your day. You need to decide. ― Seth Godin",
+        ],
+        [
+          'Decide to decide what not to do',
+          'There is only is so much time in your day (and your life). Decide what you really want to do.',
+        ],
+      ];
+      var randomIndex = Math.floor(Math.random() * productivityTips.length);
+      var headingEl = document.getElementById('heading');
+      var textEl = document.getElementById('text');
+      if (headingEl && textEl) {
+        headingEl.innerText = productivityTips[randomIndex][0];
+        textEl.innerText = productivityTips[randomIndex][1];
+      }
+
+      (function () {})();
+    </script>
+  </body>
+</html>

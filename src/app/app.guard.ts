@@ -1,0 +1,215 @@
+import { Injectable, inject } from '@angular/core';
+import {
+  ActivatedRouteSnapshot,
+  Router,
+  RouterStateSnapshot,
+  UrlTree,
+} from '@angular/router';
+import { WorkContextService } from './features/work-context/work-context.service';
+import { Observable, of } from 'rxjs';
+import { catchError, concatMap, map, switchMap, take } from 'rxjs/operators';
+import { Log } from './core/log';
+import { WorkContextType } from './features/work-context/work-context.model';
+import { TagService } from './features/tag/tag.service';
+import { ProjectService } from './features/project/project.service';
+import { Store } from '@ngrx/store';
+import { selectIsOverlayShown } from './features/focus-mode/store/focus-mode.selectors';
+import { DataInitStateService } from './core/data-init/data-init-state.service';
+import { GlobalConfigService } from './features/config/global-config.service';
+import { getStartPageUrlPath } from './features/config/default-start-page.util';
+import { IS_DONATION_UI_RESTRICTED_TOKEN } from './app.constants';
+import { AppFeaturesConfig } from './features/config/global-config.model';
+import { selectAllBoards } from './features/boards/store/boards.selectors';
+import { LS } from './core/persistence/storage-keys.const';
+
+@Injectable({ providedIn: 'root' })
+export class DonatePageGuard {
+  private _isDonationUiRestricted = inject(IS_DONATION_UI_RESTRICTED_TOKEN);
+  private _router = inject(Router);
+
+  canActivate(): true | UrlTree {
+    return this._isDonationUiRestricted ? this._router.parseUrl('/') : true;
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class ActiveWorkContextGuard {
+  private _workContextService = inject(WorkContextService);
+  private _router = inject(Router);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<UrlTree> {
+    return this._workContextService.activeWorkContextTypeAndId$.pipe(
+      take(1),
+      switchMap(({ activeType, activeId }) => {
+        const { subPageType, param } = next.params;
+        const base = activeType === WorkContextType.TAG ? 'tag' : 'project';
+        const url = `/${base}/${activeId}/${subPageType}${param ? '/' + param : ''}`;
+        const urlTree = this._router.parseUrl(url);
+        urlTree.queryParams = next.queryParams;
+        return of(urlTree);
+      }),
+    );
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class ValidTagIdGuard {
+  private _tagService = inject(TagService);
+  private _dataInitStateService = inject(DataInitStateService);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<boolean> {
+    const { id } = next.params;
+    return this._dataInitStateService.isAllDataLoadedInitially$.pipe(
+      concatMap(() => this._tagService.getTagById$(id)),
+      catchError((err) => {
+        Log.warn(`ValidTagIdGuard: failed to look up tag '${id}'`, err);
+        return of(false);
+      }),
+      take(1),
+      map((tag) => !!tag),
+    );
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class FocusOverlayOpenGuard {
+  private _store = inject(Store);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<boolean> {
+    return this._store.select(selectIsOverlayShown).pipe(map((isShown) => !isShown));
+  }
+
+  canActivateChild(
+    childRoute: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<boolean> {
+    return this.canActivate(childRoute, state);
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class ValidProjectIdGuard {
+  private _projectService = inject(ProjectService);
+  private _dataInitStateService = inject(DataInitStateService);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<boolean> {
+    const { id } = next.params;
+    return this._dataInitStateService.isAllDataLoadedInitially$.pipe(
+      concatMap(() => this._projectService.getByIdOnce$(id)),
+      catchError((err) => {
+        Log.warn(`ValidProjectIdGuard: failed to look up project '${id}'`, err);
+        return of(false);
+      }),
+      map((project) => !!project),
+    );
+  }
+}
+
+/**
+ * `/boards/:boardId` opens a view; `/boards` resolves to the last opened view,
+ * else the first one, else the page's "no views" state. Waits for the initial
+ * data load: until then the store holds the default boards only, so a custom
+ * view id would look unknown and a reload would lose the deep link.
+ */
+@Injectable({ providedIn: 'root' })
+export class BoardRouteGuard {
+  private _store = inject(Store);
+  private _dataInitStateService = inject(DataInitStateService);
+  private _router = inject(Router);
+
+  canActivate(next: ActivatedRouteSnapshot): Observable<true | UrlTree> {
+    const boardId: string | undefined = next.params['boardId'];
+    return this._dataInitStateService.isAllDataLoadedInitially$.pipe(
+      concatMap(() => this._store.select(selectAllBoards).pipe(take(1))),
+      map((boards) => {
+        if (boardId) {
+          return boards.some((board) => board.id === boardId)
+            ? true
+            : this._router.createUrlTree(['/boards']);
+        }
+        const lastId = localStorage.getItem(LS.SELECTED_BOARD);
+        const target = boards.find((board) => board.id === lastId) ?? boards[0];
+        return target ? this._router.createUrlTree(['/boards', target.id]) : true;
+      }),
+    );
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class DefaultStartPageGuard {
+  private _globalConfigService = inject(GlobalConfigService);
+  private _projectService = inject(ProjectService);
+  private _dataInitStateService = inject(DataInitStateService);
+  private _router = inject(Router);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<UrlTree> {
+    return this._dataInitStateService.isAllDataLoadedInitially$.pipe(
+      concatMap(() => this._globalConfigService.misc$),
+      take(1),
+      concatMap((miscCfg) => this._resolve(miscCfg?.defaultStartPage)),
+    );
+  }
+
+  private _resolve(startPage: number | string | undefined): Observable<UrlTree> {
+    const appFeatures = this._globalConfigService.appFeatures();
+
+    if (typeof startPage === 'string' && startPage.length > 0) {
+      // Project id — look it up so getStartPageUrlPath can fall back to Today
+      // when the project is missing, archived, or hidden from the menu.
+      return this._projectService.getByIdOnce$(startPage).pipe(
+        catchError((err) => {
+          Log.warn(
+            `DefaultStartPageGuard: failed to look up project '${startPage}'`,
+            err,
+          );
+          return of(undefined);
+        }),
+        map((project) =>
+          this._router.parseUrl(getStartPageUrlPath(startPage, appFeatures, project)),
+        ),
+      );
+    }
+
+    return of(
+      this._router.parseUrl(getStartPageUrlPath(startPage, appFeatures, undefined)),
+    );
+  }
+}
+@Injectable({ providedIn: 'root' })
+export class FeatureEnabledGuard {
+  private _configService = inject(GlobalConfigService);
+  private _dataInitStateService = inject(DataInitStateService);
+  private _router = inject(Router);
+
+  canActivate(
+    next: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot,
+  ): Observable<boolean | UrlTree> {
+    const key = next.data['featureConfigKey'] as keyof AppFeaturesConfig;
+
+    if (!key) {
+      return of(true);
+    }
+
+    return this._dataInitStateService.isAllDataLoadedInitially$.pipe(
+      concatMap(() => this._configService.appFeatures$),
+      take(1),
+      map((features) => (features[key] ? true : this._router.parseUrl('/'))),
+    );
+  }
+}

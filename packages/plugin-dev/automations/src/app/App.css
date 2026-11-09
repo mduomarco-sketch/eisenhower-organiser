@@ -1,0 +1,10 @@
+/*
+ * Automations Plugin Styles
+ * The UI kit covers elements, dialogs, layout and callouts; only the
+ * transparent page background is plugin-specific.
+ */
+
+html,
+body {
+  background-color: transparent;
+}

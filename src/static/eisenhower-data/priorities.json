@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-11-09T06:00:00Z",
+  "tasks": [
+    {
+      "eventId": "sample-001",
+      "title": "Submit structures assignment",
+      "due": "2026-11-10",
+      "urgent": true,
+      "important": true,
+      "rank": 1,
+      "reason": "Graded coursework due tomorrow.",
+      "description": "Final PDF to the course portal before midnight."
+    },
+    {
+      "eventId": "sample-002",
+      "title": "Prepare portfolio for internship applications",
+      "due": "2026-12-15",
+      "urgent": false,
+      "important": true,
+      "rank": 2,
+      "reason": "Matters for her career, but the deadline is weeks away."
+    },
+    {
+      "eventId": "sample-003",
+      "title": "Reply to the student association email",
+      "due": "2026-11-11",
+      "urgent": true,
+      "important": false,
+      "rank": 3,
+      "reason": "Due soon, low stakes."
+    },
+    {
+      "eventId": "sample-004",
+      "title": "Reorganise photo folders",
+      "due": "2027-01-20",
+      "urgent": false,
+      "important": false,
+      "rank": 4,
+      "reason": "Nice to have, no deadline pressure."
+    }
+  ]
+}

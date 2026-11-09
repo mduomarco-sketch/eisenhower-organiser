@@ -1,0 +1,32 @@
+@use '../../../../styles/_globals.scss' as *;
+
+:host {
+  //border: 1px solid var(--c-light-20);
+  @include extraBorder();
+  border-radius: 8px;
+  min-height: 200px;
+  min-width: 280px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  max-height: 100%;
+  // space for outline
+  padding: 1px;
+
+  @include mq(xs, max) {
+    min-height: 300px;
+  }
+}
+
+// Part of one task list (the view's only list, or one of its sections): no
+// box of its own, the page scrolls.
+:host(.isListLayout) {
+  border: 0;
+  border-radius: 0;
+  // As tall as its rows: a grid row of the board may not shrink it (`0`
+  // let a long section overlap the next one).
+  min-height: auto;
+  max-height: none;
+  overflow: visible;
+}

@@ -1,0 +1,9 @@
+<div
+  #contextMenuTriggerEl
+  [matMenuTriggerFor]="menu()"
+  [matMenuTriggerRestoreFocus]="false"
+  (menuClosed)="onMenuClosed()"
+  style="visibility: hidden; height: 0; width: 0; position: fixed"
+  [style.left]="contextMenuPosition.x"
+  [style.top]="contextMenuPosition.y"
+></div>
